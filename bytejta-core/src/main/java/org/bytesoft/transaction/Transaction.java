@@ -21,13 +21,23 @@ import javax.transaction.RollbackException;
 import javax.transaction.SystemException;
 
 import org.bytesoft.transaction.archive.TransactionArchive;
+import org.bytesoft.transaction.remote.RemoteSvc;
+import org.bytesoft.transaction.supports.TransactionExtra;
 import org.bytesoft.transaction.supports.TransactionListener;
 import org.bytesoft.transaction.supports.TransactionResourceListener;
 import org.bytesoft.transaction.supports.resource.XAResourceDescriptor;
 
-public interface Transaction extends javax.transaction.Transaction {
+public interface Transaction extends javax.transaction.Transaction, TransactionExtra {
+
+	public void fireBeforeTransactionCompletion() throws RollbackRequiredException, SystemException;
+
+	public void fireBeforeTransactionCompletionQuietly();
+
+	public void fireAfterTransactionCompletion();
 
 	public boolean isLocalTransaction();
+
+	public boolean isMarkedRollbackOnly();
 
 	public void setRollbackOnlyQuietly();
 
@@ -47,11 +57,13 @@ public interface Transaction extends javax.transaction.Transaction {
 
 	public void registerTransactionResourceListener(TransactionResourceListener listener);
 
-	public Object getTransactionalExtra();
+	public TransactionExtra getTransactionalExtra();
 
-	public void setTransactionalExtra(Object transactionalExtra);
+	public void setTransactionalExtra(TransactionExtra transactionalExtra);
 
-	public XAResourceDescriptor getResourceDescriptor(String identifier);
+	public XAResourceDescriptor getResourceDescriptor(String beanName);
+
+	public XAResourceDescriptor getRemoteCoordinator(RemoteSvc remoteSvc);
 
 	public XAResourceDescriptor getRemoteCoordinator(String application);
 
@@ -75,5 +87,7 @@ public interface Transaction extends javax.transaction.Transaction {
 	public void recoveryCommit() throws CommitRequiredException, SystemException;
 
 	public void recoveryRollback() throws RollbackRequiredException, SystemException;
+
+	public Exception getCreatedAt();
 
 }

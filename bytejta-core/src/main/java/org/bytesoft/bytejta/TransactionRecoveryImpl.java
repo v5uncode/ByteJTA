@@ -24,8 +24,8 @@ import javax.transaction.xa.XAResource;
 
 import org.apache.commons.lang3.StringUtils;
 import org.bytesoft.bytejta.supports.resource.RemoteResourceDescriptor;
-import org.bytesoft.bytejta.supports.wire.RemoteCoordinator;
 import org.bytesoft.common.utils.ByteUtils;
+import org.bytesoft.common.utils.CommonUtils;
 import org.bytesoft.transaction.CommitRequiredException;
 import org.bytesoft.transaction.RollbackRequiredException;
 import org.bytesoft.transaction.Transaction;
@@ -39,6 +39,7 @@ import org.bytesoft.transaction.aware.TransactionBeanFactoryAware;
 import org.bytesoft.transaction.logging.TransactionLogger;
 import org.bytesoft.transaction.recovery.TransactionRecoveryCallback;
 import org.bytesoft.transaction.recovery.TransactionRecoveryListener;
+import org.bytesoft.transaction.remote.RemoteSvc;
 import org.bytesoft.transaction.supports.resource.XAResourceDescriptor;
 import org.bytesoft.transaction.xa.TransactionXid;
 import org.bytesoft.transaction.xa.XidFactory;
@@ -47,6 +48,7 @@ import org.slf4j.LoggerFactory;
 
 public class TransactionRecoveryImpl implements TransactionRecovery, TransactionBeanFactoryAware {
 	static final Logger logger = LoggerFactory.getLogger(TransactionRecoveryImpl.class);
+	static final long SECOND_MILLIS = 1000L;
 
 	private TransactionRecoveryListener listener;
 	@javax.inject.Inject
@@ -60,25 +62,32 @@ public class TransactionRecoveryImpl implements TransactionRecovery, Transaction
 			Transaction transaction = transactions.get(i);
 			TransactionContext transactionContext = transaction.getTransactionContext();
 			TransactionXid xid = transactionContext.getXid();
+			int recoveredTimes = transactionContext.getRecoveredTimes() > 10 ? 10 : transactionContext.getRecoveredTimes();
+			long recoverMillis = transactionContext.getCreatedTime() + SECOND_MILLIS * 60L * (long) Math.pow(2, recoveredTimes);
+
+			if (System.currentTimeMillis() < recoverMillis) {
+				continue;
+			} // end-if (System.currentTimeMillis() < recoverMillis)
+
 			try {
 				this.recoverTransaction(transaction);
 				value++;
 			} catch (CommitRequiredException ex) {
-				logger.debug("[{}] recover: branch={}, message= commit-required",
+				logger.debug("{}> recover: branch={}, message= commit-required",
 						ByteUtils.byteArrayToString(xid.getGlobalTransactionId()),
 						ByteUtils.byteArrayToString(xid.getBranchQualifier()), ex);
 				continue;
 			} catch (RollbackRequiredException ex) {
-				logger.debug("[{}] recover: branch={}, message= rollback-required",
+				logger.debug("{}> recover: branch={}, message= rollback-required",
 						ByteUtils.byteArrayToString(xid.getGlobalTransactionId()),
 						ByteUtils.byteArrayToString(xid.getBranchQualifier()), ex);
 				continue;
 			} catch (SystemException ex) {
-				logger.debug("[{}] recover: branch={}, message= {}", ByteUtils.byteArrayToString(xid.getGlobalTransactionId()),
+				logger.debug("{}> recover: branch={}, message= {}", ByteUtils.byteArrayToString(xid.getGlobalTransactionId()),
 						ByteUtils.byteArrayToString(xid.getBranchQualifier()), ex.getMessage(), ex);
 				continue;
 			} catch (RuntimeException ex) {
-				logger.debug("[{}] recover: branch={}, message= {}", ByteUtils.byteArrayToString(xid.getGlobalTransactionId()),
+				logger.debug("{}> recover: branch={}, message= {}", ByteUtils.byteArrayToString(xid.getGlobalTransactionId()),
 						ByteUtils.byteArrayToString(xid.getBranchQualifier()), ex.getMessage(), ex);
 				continue;
 			}
@@ -101,7 +110,7 @@ public class TransactionRecoveryImpl implements TransactionRecovery, Transaction
 
 	}
 
-	private void recoverCoordinator(Transaction transaction)
+	protected void recoverCoordinator(Transaction transaction)
 			throws CommitRequiredException, RollbackRequiredException, SystemException {
 
 		switch (transaction.getTransactionStatus()) {
@@ -127,7 +136,7 @@ public class TransactionRecoveryImpl implements TransactionRecovery, Transaction
 		}
 	}
 
-	private void recoverParticipant(Transaction transaction)
+	protected void recoverParticipant(Transaction transaction)
 			throws CommitRequiredException, RollbackRequiredException, SystemException {
 
 		TransactionImpl transactionImpl = (TransactionImpl) transaction;
@@ -156,7 +165,7 @@ public class TransactionRecoveryImpl implements TransactionRecovery, Transaction
 
 			public void recover(TransactionArchive archive) {
 				try {
-					TransactionImpl transaction = reconstructTransaction(archive);
+					TransactionImpl transaction = (TransactionImpl) reconstruct(archive);
 					if (listener != null) {
 						listener.onRecovery(transaction);
 					}
@@ -172,11 +181,11 @@ public class TransactionRecoveryImpl implements TransactionRecovery, Transaction
 		});
 
 		TransactionCoordinator transactionCoordinator = //
-				(TransactionCoordinator) this.beanFactory.getTransactionCoordinator();
+				(TransactionCoordinator) this.beanFactory.getNativeParticipant();
 		transactionCoordinator.markParticipantReady();
 	}
 
-	private TransactionImpl reconstructTransaction(TransactionArchive archive) throws IllegalStateException {
+	public org.bytesoft.transaction.Transaction reconstruct(TransactionArchive archive) throws IllegalStateException {
 		XidFactory xidFactory = this.beanFactory.getXidFactory();
 		TransactionContext transactionContext = new TransactionContext();
 		TransactionXid xid = (TransactionXid) archive.getXid();
@@ -184,6 +193,8 @@ public class TransactionRecoveryImpl implements TransactionRecovery, Transaction
 		transactionContext.setRecoveried(true);
 		transactionContext.setCoordinator(archive.isCoordinator());
 		transactionContext.setPropagatedBy(archive.getPropagatedBy());
+		transactionContext.setRecoveredTimes(archive.getRecoveredTimes());
+		transactionContext.setCreatedTime(archive.getRecoveredAt());
 
 		TransactionImpl transaction = new TransactionImpl(transactionContext);
 		transaction.setBeanFactory(this.beanFactory);
@@ -198,27 +209,42 @@ public class TransactionRecoveryImpl implements TransactionRecovery, Transaction
 		transaction.getRemoteParticipantList().addAll(remoteResources);
 
 		List<XAResourceArchive> participants = transaction.getParticipantList();
-		Map<String, XAResourceArchive> applicationMap = transaction.getApplicationMap();
-		Map<String, XAResourceArchive> participantMap = transaction.getParticipantMap();
+		Map<String, XAResourceArchive> nativeParticipantMap = transaction.getNativeParticipantMap();
+		Map<RemoteSvc, XAResourceArchive> remoteParticipantMap = transaction.getRemoteParticipantMap();
+
 		if (archive.getOptimizedResource() != null) {
-			participants.add(archive.getOptimizedResource());
+			XAResourceArchive optimized = archive.getOptimizedResource();
+			XAResourceDescriptor descriptor = optimized.getDescriptor();
+			String identifier = descriptor.getIdentifier();
+			if (RemoteResourceDescriptor.class.isInstance(descriptor)) {
+				RemoteSvc remoteSvc = CommonUtils.getRemoteSvc(identifier);
+				remoteParticipantMap.put(remoteSvc, optimized);
+			} else {
+				nativeParticipantMap.put(identifier, optimized);
+			}
+
+			participants.add(optimized);
+		}
+
+		for (int i = 0; i < nativeResources.size(); i++) {
+			XAResourceArchive element = nativeResources.get(i);
+			XAResourceDescriptor descriptor = element.getDescriptor();
+			String identifier = StringUtils.trimToEmpty(descriptor.getIdentifier());
+			nativeParticipantMap.put(identifier, element);
 		}
 		participants.addAll(nativeResources);
-		participants.addAll(remoteResources);
 
-		for (int i = 0; i < participants.size(); i++) {
-			XAResourceArchive element = participants.get(i);
+		for (int i = 0; i < remoteResources.size(); i++) {
+			XAResourceArchive element = remoteResources.get(i);
 			XAResourceDescriptor descriptor = element.getDescriptor();
 			String identifier = StringUtils.trimToEmpty(descriptor.getIdentifier());
 
 			if (RemoteResourceDescriptor.class.isInstance(descriptor)) {
-				RemoteResourceDescriptor resourceDescriptor = (RemoteResourceDescriptor) descriptor;
-				RemoteCoordinator remoteCoordinator = resourceDescriptor.getDelegate();
-				applicationMap.put(remoteCoordinator.getApplication(), element);
+				RemoteSvc remoteSvc = CommonUtils.getRemoteSvc(identifier);
+				remoteParticipantMap.put(remoteSvc, element);
 			} // end-if (RemoteResourceDescriptor.class.isInstance(descriptor))
-
-			participantMap.put(identifier, element);
 		}
+		participants.addAll(remoteResources);
 
 		transaction.recoverTransactionStrategy(archive.getTransactionStrategyType());
 
@@ -227,6 +253,10 @@ public class TransactionRecoveryImpl implements TransactionRecovery, Transaction
 		}
 
 		return transaction;
+	}
+
+	public TransactionBeanFactory getBeanFactory() {
+		return beanFactory;
 	}
 
 	public void setBeanFactory(TransactionBeanFactory tbf) {

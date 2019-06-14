@@ -20,9 +20,11 @@ import java.util.List;
 
 import org.apache.commons.lang3.StringUtils;
 import org.bytesoft.common.utils.ByteUtils;
+import org.bytesoft.common.utils.CommonUtils;
 import org.bytesoft.transaction.archive.TransactionArchive;
 import org.bytesoft.transaction.archive.XAResourceArchive;
 import org.bytesoft.transaction.logging.ArchiveDeserializer;
+import org.bytesoft.transaction.remote.RemoteNode;
 import org.bytesoft.transaction.xa.TransactionXid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,14 +38,15 @@ public class TransactionArchiveDeserializer implements ArchiveDeserializer {
 		TransactionArchive archive = (TransactionArchive) obj;
 
 		String propagatedBy = String.valueOf(archive.getPropagatedBy());
-		String[] address = propagatedBy.split("\\s*\\:\\s*");
+		// String[] address = propagatedBy.split("\\s*\\:\\s*");
+		RemoteNode remoteNode = CommonUtils.getRemoteNode(propagatedBy);
 		byte[] hostByteArray = new byte[4];
 		byte[] nameByteArray = new byte[0];
 		byte[] portByteArray = new byte[2];
-		if (address.length == 3) {
-			String hostStr = address[0];
-			String nameStr = address[1];
-			String portStr = address[2];
+		if (remoteNode != null) {
+			String hostStr = remoteNode.getServerHost();
+			String nameStr = remoteNode.getServiceKey();
+			String portStr = String.valueOf(remoteNode.getServerPort());
 
 			String[] hostArray = hostStr.split("\\s*\\.\\s*");
 			for (int i = 0; hostArray.length == 4 && i < hostArray.length; i++) {
@@ -66,6 +69,9 @@ public class TransactionArchiveDeserializer implements ArchiveDeserializer {
 			}
 		}
 
+		long recoveredMillis = archive.getRecoveredAt();
+		int recoveredTimes = archive.getRecoveredTimes();
+
 		XAResourceArchive optimizedArchive = archive.getOptimizedResource();
 
 		List<XAResourceArchive> nativeArchiveList = archive.getNativeResources();
@@ -78,7 +84,7 @@ public class TransactionArchiveDeserializer implements ArchiveDeserializer {
 
 		int transactionStrategy = archive.getTransactionStrategyType();
 
-		int length = 3 + 3 + 1 + 4 + 1 + nameByteArray.length + 2;
+		int length = 3 + 3 + 1 + 4 + 1 + nameByteArray.length + 2 + 8 + 1;
 		byte[][] nativeByteArray = new byte[nativeArchiveNumber][];
 		for (int i = 0; i < nativeArchiveNumber; i++) {
 			XAResourceArchive resourceArchive = nativeArchiveList.get(i);
@@ -145,6 +151,11 @@ public class TransactionArchiveDeserializer implements ArchiveDeserializer {
 		System.arraycopy(portByteArray, 0, byteArray, position, 2);
 		position = position + 2;
 
+		byteArray[position++] = (byte) (recoveredTimes - 128);
+		byte[] millisByteArray = ByteUtils.longToByteArray(recoveredMillis);
+		System.arraycopy(millisByteArray, 0, byteArray, position, millisByteArray.length);
+		position = position + millisByteArray.length;
+
 		for (int i = 0; i < nativeArchiveNumber; i++) {
 			byte[] elementByteArray = nativeByteArray[i];
 			System.arraycopy(elementByteArray, 0, byteArray, position, elementByteArray.length);
@@ -166,7 +177,6 @@ public class TransactionArchiveDeserializer implements ArchiveDeserializer {
 	}
 
 	public Object deserialize(TransactionXid xid, byte[] array) {
-
 		ByteBuffer buffer = ByteBuffer.wrap(array);
 
 		TransactionArchive archive = new TransactionArchive();
@@ -208,6 +218,14 @@ public class TransactionArchiveDeserializer implements ArchiveDeserializer {
 
 		int port = 32768 + buffer.getShort();
 		archive.setPropagatedBy(String.format("%s:%s:%s", host, name, port));
+
+		int recoveredTimes = 128 + buffer.get();
+		byte[] millisByteArray = new byte[8];
+		buffer.get(millisByteArray);
+		long recoveredAt = ByteUtils.byteArrayToLong(millisByteArray);
+
+		archive.setRecoveredTimes(recoveredTimes);
+		archive.setRecoveredAt(recoveredAt);
 
 		for (int i = 0; i < nativeArchiveNumber; i++) {
 			int length = buffer.getShort();

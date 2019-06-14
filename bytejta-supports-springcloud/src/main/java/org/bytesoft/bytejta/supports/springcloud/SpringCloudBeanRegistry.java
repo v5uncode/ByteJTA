@@ -18,11 +18,14 @@ package org.bytesoft.bytejta.supports.springcloud;
 import java.lang.reflect.Proxy;
 
 import org.apache.commons.lang3.StringUtils;
+import org.bytesoft.bytejta.supports.internal.RemoteCoordinatorRegistry;
 import org.bytesoft.bytejta.supports.springcloud.loadbalancer.TransactionLoadBalancerInterceptor;
-import org.bytesoft.bytejta.supports.wire.RemoteCoordinator;
-import org.bytesoft.bytejta.supports.wire.RemoteCoordinatorRegistry;
+import org.bytesoft.common.utils.CommonUtils;
 import org.bytesoft.transaction.TransactionBeanFactory;
 import org.bytesoft.transaction.aware.TransactionBeanFactoryAware;
+import org.bytesoft.transaction.remote.RemoteAddr;
+import org.bytesoft.transaction.remote.RemoteCoordinator;
+import org.bytesoft.transaction.remote.RemoteNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.EnvironmentAware;
@@ -55,20 +58,39 @@ public final class SpringCloudBeanRegistry implements TransactionBeanFactoryAwar
 			return null;
 		}
 
-		RemoteCoordinator coordinator = registry.getRemoteCoordinator(identifier);
-		if (coordinator != null) {
-			return coordinator;
+		RemoteAddr remoteAddr = CommonUtils.getRemoteAddr(identifier);
+		RemoteNode remoteNode = CommonUtils.getRemoteNode(identifier);
+
+		RemoteNode targetNode = registry.getRemoteNode(remoteAddr);
+		if (targetNode == null && remoteAddr != null //
+				&& remoteNode != null && StringUtils.isNotBlank(remoteNode.getServiceKey())) {
+			registry.putRemoteNode(remoteAddr, remoteNode);
+		}
+
+		// String application = CommonUtils.getApplication(identifier);
+		// RemoteCoordinator participant = registry.getParticipant(application);
+		// if (participant != null) {
+		// return participant;
+		// }
+
+		RemoteCoordinator physical = registry.getPhysicalInstance(remoteAddr);
+		if (physical != null) {
+			return physical;
 		}
 
 		SpringCloudCoordinator handler = new SpringCloudCoordinator();
 		handler.setIdentifier(identifier);
 		handler.setEnvironment(this.environment);
 
-		coordinator = (RemoteCoordinator) Proxy.newProxyInstance(SpringCloudCoordinator.class.getClassLoader(),
+		physical = (RemoteCoordinator) Proxy.newProxyInstance(SpringCloudCoordinator.class.getClassLoader(),
 				new Class[] { RemoteCoordinator.class }, handler);
-		registry.putRemoteCoordinator(identifier, coordinator);
 
-		return coordinator;
+		registry.putPhysicalInstance(remoteAddr, physical);
+
+		// registry.putRemoteNode(remoteAddr, remoteNode);
+		// registry.putParticipant(application, participant);
+
+		return physical;
 	}
 
 	public TransactionLoadBalancerInterceptor getLoadBalancerInterceptor() {

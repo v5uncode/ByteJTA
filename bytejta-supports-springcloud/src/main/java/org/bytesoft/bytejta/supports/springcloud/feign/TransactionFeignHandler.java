@@ -23,15 +23,16 @@ import java.util.Map;
 
 import org.bytesoft.bytejta.TransactionImpl;
 import org.bytesoft.bytejta.supports.rpc.TransactionRequestImpl;
+import org.bytesoft.bytejta.supports.rpc.TransactionResponseImpl;
 import org.bytesoft.bytejta.supports.springcloud.SpringCloudBeanRegistry;
 import org.bytesoft.bytejta.supports.springcloud.loadbalancer.TransactionLoadBalancerInterceptor;
-import org.bytesoft.bytejta.supports.springcloud.rpc.TransactionResponseImpl;
-import org.bytesoft.bytejta.supports.wire.RemoteCoordinator;
 import org.bytesoft.common.utils.CommonUtils;
 import org.bytesoft.transaction.TransactionBeanFactory;
 import org.bytesoft.transaction.TransactionContext;
 import org.bytesoft.transaction.TransactionManager;
 import org.bytesoft.transaction.archive.XAResourceArchive;
+import org.bytesoft.transaction.remote.RemoteCoordinator;
+import org.bytesoft.transaction.remote.RemoteSvc;
 import org.bytesoft.transaction.supports.rpc.TransactionInterceptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,14 +42,10 @@ import com.netflix.loadbalancer.Server;
 import com.netflix.loadbalancer.Server.MetaInfo;
 import com.netflix.niws.loadbalancer.DiscoveryEnabledServer;
 
-import feign.InvocationHandlerFactory.MethodHandler;
-import feign.Target;
-
 public class TransactionFeignHandler implements InvocationHandler {
 	static final Logger logger = LoggerFactory.getLogger(TransactionFeignHandler.class);
 
-	private Target<?> target;
-	private Map<Method, MethodHandler> handlers;
+	private InvocationHandler delegate;
 
 	public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
 		if (Object.class.equals(method.getDeclaringClass())) {
@@ -62,7 +59,7 @@ public class TransactionFeignHandler implements InvocationHandler {
 			TransactionImpl transaction = //
 					(TransactionImpl) transactionManager.getTransactionQuietly();
 			if (transaction == null) {
-				return this.handlers.get(method).invoke(args);
+				return this.delegate.invoke(proxy, method, args);
 			}
 
 			final TransactionContext transactionContext = transaction.getTransactionContext();
@@ -70,7 +67,7 @@ public class TransactionFeignHandler implements InvocationHandler {
 			final TransactionRequestImpl request = new TransactionRequestImpl();
 			final TransactionResponseImpl response = new TransactionResponseImpl();
 
-			final Map<String, XAResourceArchive> participants = transaction.getParticipantMap();
+			final Map<RemoteSvc, XAResourceArchive> participants = transaction.getRemoteParticipantMap();
 			beanRegistry.setLoadBalancerInterceptor(new TransactionLoadBalancerInterceptor() {
 				public List<Server> beforeCompletion(List<Server> servers) {
 					final List<Server> readyServerList = new ArrayList<Server>();
@@ -158,14 +155,10 @@ public class TransactionFeignHandler implements InvocationHandler {
 			});
 
 			try {
-				return this.handlers.get(method).invoke(args);
-
-				// catch (feign.RetryableException ex) {
-				// // Throwable cause = ex.getCause();
-				// // boolean participantDelistFlag = cause != null && java.net.ConnectException.class.isInstance(cause);
-				// // response.setParticipantDelistFlag(participantDelistFlag);
+				return this.delegate.invoke(proxy, method, args);
 			} finally {
-				if (response.isIntercepted() == false) {
+				Object interceptedValue = response.getHeader(TransactionInterceptor.class.getName());
+				if (Boolean.valueOf(String.valueOf(interceptedValue)) == false) {
 					response.setTransactionContext(transactionContext);
 
 					RemoteCoordinator coordinator = request.getTargetTransactionCoordinator();
@@ -179,20 +172,12 @@ public class TransactionFeignHandler implements InvocationHandler {
 		}
 	}
 
-	public Target<?> getTarget() {
-		return target;
+	public InvocationHandler getDelegate() {
+		return delegate;
 	}
 
-	public void setTarget(Target<?> target) {
-		this.target = target;
-	}
-
-	public Map<Method, MethodHandler> getHandlers() {
-		return handlers;
-	}
-
-	public void setHandlers(Map<Method, MethodHandler> handlers) {
-		this.handlers = handlers;
+	public void setDelegate(InvocationHandler delegate) {
+		this.delegate = delegate;
 	}
 
 }

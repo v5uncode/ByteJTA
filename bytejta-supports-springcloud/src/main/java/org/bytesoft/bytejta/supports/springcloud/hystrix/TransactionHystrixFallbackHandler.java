@@ -26,8 +26,9 @@ public class TransactionHystrixFallbackHandler implements InvocationHandler {
 	}
 
 	public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-		Method targetMethod = (Method) args[1];
-		Object[] targetArgs = (Object[]) args[2];
+		TransactionHystrixInvocation invocation = (TransactionHystrixInvocation) args[0];
+		Method targetMethod = invocation.getMethod(); // (Method) args[1];
+		Object[] targetArgs = invocation.getArgs(); // (Object[]) args[2];
 		return targetMethod.invoke(this.fallback, targetArgs);
 	}
 

@@ -20,28 +20,51 @@ import java.util.List;
 
 import javax.transaction.Synchronization;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class SynchronizationList implements Synchronization {
+	private static final Logger logger = LoggerFactory.getLogger(SynchronizationList.class);
 	private final List<Synchronization> synchronizations = new ArrayList<Synchronization>();
+
+	private boolean beforeCompletionInvoked;
+	private boolean finishCompletionInvoked;
 
 	public void registerSynchronizationQuietly(Synchronization sync) {
 		SynchronizationImpl synchronization = new SynchronizationImpl(sync);
 		this.synchronizations.add(synchronization);
 	}
 
-	public void beforeCompletion() {
-		int length = this.synchronizations.size();
-		for (int i = 0; i < length; i++) {
-			Synchronization synchronization = this.synchronizations.get(i);
-			synchronization.beforeCompletion();
-		} // end-for
+	public synchronized void beforeCompletion() {
+		if (this.beforeCompletionInvoked == false) {
+			int length = this.synchronizations.size();
+			for (int i = 0; i < length; i++) {
+				Synchronization synchronization = this.synchronizations.get(i);
+				try {
+					synchronization.beforeCompletion();
+				} catch (RuntimeException error) {
+					logger.error(error.getMessage(), error);
+				}
+			} // end-for
+
+			this.beforeCompletionInvoked = true;
+		} // end-if (this.beforeCompletionInvoked == false)
 	}
 
-	public void afterCompletion(int status) {
-		int length = this.synchronizations.size();
-		for (int i = 0; i < length; i++) {
-			Synchronization synchronization = this.synchronizations.get(i);
-			synchronization.afterCompletion(status);
-		} // end-for
+	public synchronized void afterCompletion(int status) {
+		if (this.finishCompletionInvoked == false) {
+			int length = this.synchronizations.size();
+			for (int i = 0; i < length; i++) {
+				Synchronization synchronization = this.synchronizations.get(i);
+				try {
+					synchronization.afterCompletion(status);
+				} catch (RuntimeException error) {
+					logger.error(error.getMessage(), error);
+				}
+			} // end-for
+
+			this.finishCompletionInvoked = true;
+		} // end-if (this.finishCompletionInvoked == false)
 	}
 
 }

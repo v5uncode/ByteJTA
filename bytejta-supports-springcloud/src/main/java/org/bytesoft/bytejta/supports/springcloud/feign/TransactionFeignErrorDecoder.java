@@ -16,16 +16,16 @@
 package org.bytesoft.bytejta.supports.springcloud.feign;
 
 import java.io.IOException;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.Map;
 
 import org.apache.commons.lang3.StringUtils;
 import org.bytesoft.bytejta.supports.rpc.TransactionResponseImpl;
 import org.bytesoft.bytejta.supports.springcloud.SpringCloudBeanRegistry;
-import org.bytesoft.bytejta.supports.wire.RemoteCoordinator;
-import org.bytesoft.common.utils.ByteUtils;
-import org.bytesoft.common.utils.CommonUtils;
+import org.bytesoft.common.utils.SerializeUtils;
 import org.bytesoft.transaction.TransactionContext;
+import org.bytesoft.transaction.remote.RemoteCoordinator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
@@ -40,8 +40,8 @@ import feign.codec.ErrorDecoder;
 public class TransactionFeignErrorDecoder implements feign.codec.ErrorDecoder, InitializingBean, ApplicationContextAware {
 	static Logger logger = LoggerFactory.getLogger(TransactionFeignErrorDecoder.class);
 
-	static final String HEADER_TRANCACTION_KEY = "org.bytesoft.bytejta.transaction";
-	static final String HEADER_PROPAGATION_KEY = "org.bytesoft.bytejta.propagation";
+	static final String HEADER_TRANCACTION_KEY = "X-BYTEJTA-TRANSACTION"; // org.bytesoft.bytejta.transaction
+	static final String HEADER_PROPAGATION_KEY = "X-BYTEJTA-PROPAGATION"; // org.bytesoft.bytejta.propagation
 
 	private ApplicationContext applicationContext;
 	private feign.codec.ErrorDecoder delegate;
@@ -102,8 +102,8 @@ public class TransactionFeignErrorDecoder implements feign.codec.ErrorDecoder, I
 			String transactionStr = StringUtils.isBlank(respTransactionStr) ? reqTransactionStr : respTransactionStr;
 			String propagationStr = StringUtils.isBlank(respPropagationStr) ? reqPropagationStr : respPropagationStr;
 
-			byte[] byteArray = ByteUtils.stringToByteArray(transactionStr);
-			TransactionContext transactionContext = (TransactionContext) CommonUtils.deserializeObject(byteArray);
+			byte[] byteArray = Base64.getDecoder().decode(transactionStr); // ByteUtils.stringToByteArray(transactionStr);
+			TransactionContext transactionContext = (TransactionContext) SerializeUtils.deserializeObject(byteArray);
 
 			SpringCloudBeanRegistry beanRegistry = SpringCloudBeanRegistry.getInstance();
 			RemoteCoordinator remoteCoordinator = beanRegistry.getConsumeCoordinator(propagationStr);

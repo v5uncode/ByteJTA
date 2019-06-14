@@ -26,17 +26,30 @@ public class TransactionContext implements Serializable, Cloneable {
 	protected transient boolean propagated;
 	protected transient boolean coordinator;
 	protected transient boolean recoveried;
+	protected transient int recoveredTimes;
 
 	protected TransactionXid xid;
 	protected long createdTime;
 	protected long expiredTime;
+	protected boolean rollbackOnly;
+	protected long configFlags;
 
 	public TransactionContext clone() {
 		TransactionContext that = new TransactionContext();
 		that.xid = this.xid.clone();
 		that.createdTime = System.currentTimeMillis();
 		that.expiredTime = this.expiredTime;
+		that.rollbackOnly = this.rollbackOnly;
+		that.configFlags = this.configFlags;
 		return that;
+	}
+
+	public int getRecoveredTimes() {
+		return recoveredTimes;
+	}
+
+	public void setRecoveredTimes(int recoveredTimes) {
+		this.recoveredTimes = recoveredTimes;
 	}
 
 	public boolean isCoordinator() {
@@ -79,6 +92,14 @@ public class TransactionContext implements Serializable, Cloneable {
 		this.expiredTime = expiredTime;
 	}
 
+	public long getConfigFlags() {
+		return configFlags;
+	}
+
+	public void setConfigFlags(long configFlags) {
+		this.configFlags = configFlags;
+	}
+
 	public boolean isPropagated() {
 		return propagated;
 	}
@@ -93,6 +114,14 @@ public class TransactionContext implements Serializable, Cloneable {
 
 	public void setPropagatedBy(Object propagatedBy) {
 		this.propagatedBy = propagatedBy;
+	}
+
+	public boolean isRollbackOnly() {
+		return rollbackOnly;
+	}
+
+	public void setRollbackOnly(boolean rollbackOnly) {
+		this.rollbackOnly = rollbackOnly;
 	}
 
 }

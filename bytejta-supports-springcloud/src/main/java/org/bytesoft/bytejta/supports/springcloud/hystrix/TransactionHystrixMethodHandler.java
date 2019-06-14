@@ -22,15 +22,16 @@ import java.util.Map;
 
 import org.bytesoft.bytejta.TransactionImpl;
 import org.bytesoft.bytejta.supports.rpc.TransactionRequestImpl;
+import org.bytesoft.bytejta.supports.rpc.TransactionResponseImpl;
 import org.bytesoft.bytejta.supports.springcloud.SpringCloudBeanRegistry;
 import org.bytesoft.bytejta.supports.springcloud.loadbalancer.TransactionLoadBalancerInterceptor;
-import org.bytesoft.bytejta.supports.springcloud.rpc.TransactionResponseImpl;
-import org.bytesoft.bytejta.supports.wire.RemoteCoordinator;
 import org.bytesoft.common.utils.CommonUtils;
 import org.bytesoft.transaction.TransactionBeanFactory;
 import org.bytesoft.transaction.TransactionContext;
 import org.bytesoft.transaction.TransactionManager;
 import org.bytesoft.transaction.archive.XAResourceArchive;
+import org.bytesoft.transaction.remote.RemoteCoordinator;
+import org.bytesoft.transaction.remote.RemoteSvc;
 import org.bytesoft.transaction.supports.rpc.TransactionInterceptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,9 +58,10 @@ public class TransactionHystrixMethodHandler implements MethodHandler {
 		TransactionManager transactionManager = beanFactory.getTransactionManager();
 		final TransactionInterceptor transactionInterceptor = beanFactory.getTransactionInterceptor();
 
-		Thread thread = (Thread) argv[0];
-		Method method = (Method) argv[1];
-		Object[] args = (Object[]) argv[2];
+		TransactionHystrixInvocation invocation = (TransactionHystrixInvocation) argv[0];
+		Thread thread = invocation.getThread(); // (Thread) argv[0];
+		Method method = invocation.getMethod(); // (Method) argv[1];
+		Object[] args = invocation.getArgs(); // (Object[]) argv[2];
 
 		TransactionImpl transaction = //
 				(TransactionImpl) transactionManager.getTransaction(thread);
@@ -72,7 +74,7 @@ public class TransactionHystrixMethodHandler implements MethodHandler {
 		final TransactionRequestImpl request = new TransactionRequestImpl();
 		final TransactionResponseImpl response = new TransactionResponseImpl();
 
-		final Map<String, XAResourceArchive> participants = transaction.getParticipantMap();
+		final Map<RemoteSvc, XAResourceArchive> participants = transaction.getRemoteParticipantMap();
 		beanRegistry.setLoadBalancerInterceptor(new TransactionLoadBalancerInterceptor() {
 			public List<Server> beforeCompletion(List<Server> servers) {
 				final List<Server> readyServerList = new ArrayList<Server>();
@@ -165,7 +167,8 @@ public class TransactionHystrixMethodHandler implements MethodHandler {
 		} finally {
 
 			try {
-				if (response.isIntercepted() == false) {
+				Object interceptedValue = response.getHeader(TransactionInterceptor.class.getName());
+				if (Boolean.valueOf(String.valueOf(interceptedValue)) == false) {
 					response.setTransactionContext(transactionContext);
 
 					RemoteCoordinator coordinator = request.getTargetTransactionCoordinator();

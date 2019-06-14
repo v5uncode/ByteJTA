@@ -17,6 +17,7 @@ package org.bytesoft.bytejta.supports.springcloud.web;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -26,14 +27,15 @@ import org.bytesoft.bytejta.supports.rpc.TransactionRequestImpl;
 import org.bytesoft.bytejta.supports.rpc.TransactionResponseImpl;
 import org.bytesoft.bytejta.supports.springcloud.SpringCloudBeanRegistry;
 import org.bytesoft.bytejta.supports.springcloud.loadbalancer.TransactionLoadBalancerInterceptor;
-import org.bytesoft.bytejta.supports.wire.RemoteCoordinator;
-import org.bytesoft.common.utils.ByteUtils;
 import org.bytesoft.common.utils.CommonUtils;
+import org.bytesoft.common.utils.SerializeUtils;
 import org.bytesoft.transaction.TransactionBeanFactory;
 import org.bytesoft.transaction.TransactionContext;
 import org.bytesoft.transaction.TransactionManager;
 import org.bytesoft.transaction.archive.XAResourceArchive;
 import org.bytesoft.transaction.aware.TransactionEndpointAware;
+import org.bytesoft.transaction.remote.RemoteCoordinator;
+import org.bytesoft.transaction.remote.RemoteSvc;
 import org.bytesoft.transaction.supports.rpc.TransactionInterceptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,8 +58,8 @@ public class TransactionRequestInterceptor
 		implements ClientHttpRequestInterceptor, TransactionEndpointAware, ApplicationContextAware {
 	static final Logger logger = LoggerFactory.getLogger(TransactionRequestInterceptor.class);
 
-	static final String HEADER_TRANCACTION_KEY = "org.bytesoft.bytejta.transaction";
-	static final String HEADER_PROPAGATION_KEY = "org.bytesoft.bytejta.propagation";
+	static final String HEADER_TRANCACTION_KEY = "X-BYTEJTA-TRANSACTION"; // org.bytesoft.bytejta.transaction
+	static final String HEADER_PROPAGATION_KEY = "X-BYTEJTA-PROPAGATION"; // org.bytesoft.bytejta.propagation
 	static final String PREFIX_TRANSACTION_KEY = "/org/bytesoft/bytejta";
 
 	private String identifier;
@@ -83,7 +85,7 @@ public class TransactionRequestInterceptor
 			return execution.execute(httpRequest, body);
 		}
 
-		final Map<String, XAResourceArchive> participants = transaction.getParticipantMap();
+		final Map<RemoteSvc, XAResourceArchive> participants = transaction.getRemoteParticipantMap();
 		beanRegistry.setLoadBalancerInterceptor(new TransactionLoadBalancerInterceptor() {
 			public List<Server> beforeCompletion(List<Server> servers) {
 				final List<Server> readyServerList = new ArrayList<Server>();
@@ -197,8 +199,8 @@ public class TransactionRequestInterceptor
 
 		TransactionContext transactionContext = transaction.getTransactionContext();
 
-		byte[] reqByteArray = CommonUtils.serializeObject(transactionContext);
-		String reqTransactionStr = ByteUtils.byteArrayToString(reqByteArray);
+		byte[] reqByteArray = SerializeUtils.serializeObject(transactionContext);
+		String reqTransactionStr = Base64.getEncoder().encodeToString(reqByteArray);
 
 		HttpHeaders reqHeaders = httpRequest.getHeaders();
 		reqHeaders.add(HEADER_TRANCACTION_KEY, reqTransactionStr);
@@ -221,8 +223,10 @@ public class TransactionRequestInterceptor
 		String respTransactionStr = respHeaders.getFirst(HEADER_TRANCACTION_KEY);
 		String respPropagationStr = respHeaders.getFirst(HEADER_PROPAGATION_KEY);
 
-		byte[] byteArray = ByteUtils.stringToByteArray(StringUtils.trimToNull(respTransactionStr));
-		TransactionContext serverContext = (TransactionContext) CommonUtils.deserializeObject(byteArray);
+		String transactionText = StringUtils.trimToNull(respTransactionStr);
+		byte[] byteArray = StringUtils.isBlank(transactionText) ? null : Base64.getDecoder().decode(transactionText);
+		TransactionContext serverContext = byteArray == null || byteArray.length == 0 //
+				? null : (TransactionContext) SerializeUtils.deserializeObject(byteArray);
 
 		TransactionResponseImpl txResp = new TransactionResponseImpl();
 		txResp.setTransactionContext(serverContext);
@@ -239,6 +243,10 @@ public class TransactionRequestInterceptor
 
 	public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
 		this.applicationContext = applicationContext;
+	}
+
+	public String getEndpoint() {
+		return this.identifier;
 	}
 
 	public void setEndpoint(String identifier) {

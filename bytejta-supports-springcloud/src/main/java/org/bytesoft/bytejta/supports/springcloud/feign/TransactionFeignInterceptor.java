@@ -16,12 +16,12 @@
 package org.bytesoft.bytejta.supports.springcloud.feign;
 
 import java.io.IOException;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.Map;
 
 import org.bytesoft.bytejta.supports.springcloud.SpringCloudBeanRegistry;
-import org.bytesoft.common.utils.ByteUtils;
-import org.bytesoft.common.utils.CommonUtils;
+import org.bytesoft.common.utils.SerializeUtils;
 import org.bytesoft.transaction.Transaction;
 import org.bytesoft.transaction.TransactionBeanFactory;
 import org.bytesoft.transaction.TransactionContext;
@@ -33,8 +33,8 @@ import org.springframework.context.ApplicationContextAware;
 
 public class TransactionFeignInterceptor
 		implements feign.RequestInterceptor, TransactionEndpointAware, ApplicationContextAware {
-	static final String HEADER_TRANCACTION_KEY = "org.bytesoft.bytejta.transaction";
-	static final String HEADER_PROPAGATION_KEY = "org.bytesoft.bytejta.propagation";
+	static final String HEADER_TRANCACTION_KEY = "X-BYTEJTA-TRANSACTION"; // org.bytesoft.bytejta.transaction
+	static final String HEADER_PROPAGATION_KEY = "X-BYTEJTA-PROPAGATION"; // org.bytesoft.bytejta.propagation
 
 	private String identifier;
 	private ApplicationContext applicationContext;
@@ -50,9 +50,9 @@ public class TransactionFeignInterceptor
 
 		try {
 			TransactionContext transactionContext = transaction.getTransactionContext();
-			byte[] byteArray = CommonUtils.serializeObject(transactionContext);
+			byte[] byteArray = SerializeUtils.serializeObject(transactionContext);
 
-			String transactionText = ByteUtils.byteArrayToString(byteArray);
+			String transactionText = Base64.getEncoder().encodeToString(byteArray);
 
 			Map<String, Collection<String>> headers = template.headers();
 			if (headers.containsKey(HEADER_TRANCACTION_KEY) == false) {
@@ -66,6 +66,10 @@ public class TransactionFeignInterceptor
 		} catch (IOException ex) {
 			throw new RuntimeException("Error occurred while preparing the transaction context!", ex);
 		}
+	}
+
+	public String getEndpoint() {
+		return this.identifier;
 	}
 
 	public void setEndpoint(String identifier) {

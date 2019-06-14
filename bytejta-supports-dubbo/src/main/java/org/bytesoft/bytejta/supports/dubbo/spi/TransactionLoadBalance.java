@@ -16,86 +16,131 @@
 package org.bytesoft.bytejta.supports.dubbo.spi;
 
 import java.util.List;
-import java.util.Random;
 
-import org.apache.commons.lang3.StringUtils;
 import org.bytesoft.bytejta.TransactionImpl;
-import org.bytesoft.bytejta.supports.dubbo.InvocationContext;
 import org.bytesoft.bytejta.supports.dubbo.InvocationContextRegistry;
 import org.bytesoft.bytejta.supports.dubbo.TransactionBeanRegistry;
+import org.bytesoft.bytejta.supports.dubbo.ext.ILoadBalancer;
+import org.bytesoft.bytejta.supports.internal.RemoteCoordinatorRegistry;
+import org.bytesoft.common.utils.CommonUtils;
 import org.bytesoft.transaction.TransactionBeanFactory;
 import org.bytesoft.transaction.TransactionManager;
 import org.bytesoft.transaction.archive.XAResourceArchive;
+import org.bytesoft.transaction.remote.RemoteAddr;
+import org.bytesoft.transaction.remote.RemoteNode;
 import org.bytesoft.transaction.supports.resource.XAResourceDescriptor;
+import org.springframework.core.env.Environment;
 
 import com.alibaba.dubbo.common.URL;
+import com.alibaba.dubbo.common.extension.ExtensionLoader;
 import com.alibaba.dubbo.rpc.Invocation;
 import com.alibaba.dubbo.rpc.Invoker;
 import com.alibaba.dubbo.rpc.RpcException;
 import com.alibaba.dubbo.rpc.cluster.LoadBalance;
 
 public final class TransactionLoadBalance implements LoadBalance {
-	static final Random random = new Random();
+	static final String CONSTANT_LOADBALANCE_KEY = "org.bytesoft.bytejta.loadbalance";
+
+	private ILoadBalancer loadBalancer;
+
+	private void fireInitializeIfNecessary() {
+		if (this.loadBalancer == null) {
+			this.initializeIfNecessary();
+		}
+	}
+
+	private synchronized void initializeIfNecessary() {
+		if (this.loadBalancer == null) {
+			Environment environment = TransactionBeanRegistry.getInstance().getEnvironment();
+			String loadBalanceKey = environment.getProperty(CONSTANT_LOADBALANCE_KEY, "default");
+			ExtensionLoader<ILoadBalancer> extensionLoader = ExtensionLoader.getExtensionLoader(ILoadBalancer.class);
+			this.loadBalancer = extensionLoader.getExtension(loadBalanceKey);
+		}
+	}
 
 	public <T> Invoker<T> select(List<Invoker<T>> invokers, URL url, Invocation invocation) throws RpcException {
 		InvocationContextRegistry registry = InvocationContextRegistry.getInstance();
-		InvocationContext invocationContext = registry.getInvocationContext();
+		RemoteNode invocationContext = registry.getInvocationContext();
 		if (invocationContext == null) {
-			return this.selectRandomInvoker(invokers, url, invocation);
+			return this.selectConfigedInvoker(invokers, url, invocation);
 		} else {
 			return this.selectSpecificInvoker(invokers, url, invocation, invocationContext);
 		}
 	}
 
-	public <T> Invoker<T> selectRandomInvoker(List<Invoker<T>> invokers, URL url, Invocation invocation) throws RpcException {
-		int lengthOfInvokerList = invokers == null ? 0 : invokers.size();
+	public <T> Invoker<T> selectConfigedInvoker(List<Invoker<T>> invokers, URL url, Invocation invocation) throws RpcException {
 		if (invokers == null || invokers.isEmpty()) {
 			throw new RpcException("No invoker is found!");
 		}
 
 		TransactionBeanFactory beanFactory = TransactionBeanRegistry.getInstance().getBeanFactory();
+		RemoteCoordinatorRegistry participantRegistry = RemoteCoordinatorRegistry.getInstance();
 		TransactionManager transactionManager = beanFactory.getTransactionManager();
 		TransactionImpl transaction = //
 				(TransactionImpl) transactionManager.getTransactionQuietly();
 		List<XAResourceArchive> participantList = transaction == null ? null : transaction.getRemoteParticipantList();
 
+		RemoteAddr instanceAddr = null;
 		for (int i = 0; invokers != null && participantList != null && participantList.isEmpty() == false
 				&& i < invokers.size(); i++) {
 			Invoker<T> invoker = invokers.get(i);
 			URL invokerUrl = invoker.getUrl();
-			String invokerHost = invokerUrl.getHost();
-			int invokerPort = invokerUrl.getPort();
-			String invokerAddr = String.format("%s:%s", invokerHost, invokerPort);
-			for (int j = 0; participantList != null && j < participantList.size(); j++) {
-				XAResourceArchive archive = participantList.get(j);
-				XAResourceDescriptor descriptor = archive.getDescriptor();
-				String identifier = descriptor.getIdentifier();
-				String[] values = identifier == null ? new String[0] : identifier.split("\\s*:\\s*");
-				String targetAddr = values.length == 3 ? values[0] : null;
-				String targetPort = values.length == 3 ? values[2] : null;
-				String remoteAddr = String.format("%s:%s", targetAddr, targetPort);
-				if (StringUtils.equalsIgnoreCase(invokerAddr, remoteAddr)) {
-					return invoker;
-				} // end-if (StringUtils.equalsIgnoreCase(invokerAddr, identifier))
+			RemoteAddr invokerAddr = new RemoteAddr();
+			invokerAddr.setServerHost(invokerUrl.getHost());
+			invokerAddr.setServerPort(invokerUrl.getPort());
+
+			RemoteNode remoteNode = participantRegistry.getRemoteNode(invokerAddr);
+			if (remoteNode == null) {
+				continue;
 			}
+
+			XAResourceDescriptor participant = transaction.getRemoteCoordinator(remoteNode.getServiceKey());
+			if (participant == null) {
+				continue;
+			}
+
+			String identifier = participant.getIdentifier();
+			RemoteAddr remoteAddr = CommonUtils.getRemoteAddr(identifier);
+			if (invokerAddr.equals(remoteAddr) == false) {
+				instanceAddr = remoteAddr;
+				continue;
+			}
+
+			return invoker;
 		}
 
-		return invokers.get(random.nextInt(lengthOfInvokerList));
+		if (instanceAddr != null) {
+			throw new RpcException(
+					String.format("Invoker(%s:%s) is not found!", instanceAddr.getServerHost(), instanceAddr.getServerPort()));
+		}
+
+		this.fireInitializeIfNecessary();
+
+		if (this.loadBalancer == null) {
+			throw new RpcException("No org.bytesoft.bytejta.supports.dubbo.ext.ILoadBalancer is found!");
+		} else {
+			return this.loadBalancer.select(invokers, url, invocation);
+		}
+
 	}
 
-	public <T> Invoker<T> selectSpecificInvoker(List<Invoker<T>> invokers, URL url, Invocation invocation,
-			InvocationContext context) throws RpcException {
-		String serverHost = context.getServerHost();
-		int serverPort = context.getServerPort();
+	public <T> Invoker<T> selectSpecificInvoker(List<Invoker<T>> invokers, URL url, Invocation invocation, RemoteNode context)
+			throws RpcException {
+		RemoteAddr remoteAddr = new RemoteAddr();
+		remoteAddr.setServerHost(context.getServerHost());
+		remoteAddr.setServerPort(context.getServerPort());
 		for (int i = 0; invokers != null && i < invokers.size(); i++) {
 			Invoker<T> invoker = invokers.get(i);
 			URL targetUrl = invoker.getUrl();
-			String targetAddr = targetUrl.getIp();
-			int targetPort = targetUrl.getPort();
-			if (StringUtils.equals(targetAddr, serverHost) && targetPort == serverPort) {
+			RemoteAddr targetAddr = new RemoteAddr();
+			targetAddr.setServerHost(targetUrl.getIp());
+			targetAddr.setServerPort(targetUrl.getPort());
+			if (targetAddr.equals(remoteAddr)) {
 				return invoker;
-			}
+			} // end-if (targetAddr.equals(remoteAddr))
 		}
-		throw new RpcException(String.format("Invoker(%s:%s) is not found!", serverHost, serverPort));
+
+		throw new RpcException(String.format("Invoker(%s:%s) is not found!", context.getServerHost(), context.getServerPort()));
 	}
+
 }

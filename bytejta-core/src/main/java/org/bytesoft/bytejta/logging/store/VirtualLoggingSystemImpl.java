@@ -41,6 +41,7 @@ import org.slf4j.LoggerFactory;
 
 public abstract class VirtualLoggingSystemImpl implements VirtualLoggingSystem, VirtualLoggingTrigger, Work {
 	static final Logger logger = LoggerFactory.getLogger(VirtualLoggingSystemImpl.class);
+	static final int COMPRESS_BATCH_SIZE = 10000;
 
 	private final Lock lock = new ReentrantLock();
 	private final Lock timingLock = new ReentrantLock();
@@ -54,17 +55,29 @@ public abstract class VirtualLoggingSystemImpl implements VirtualLoggingSystem, 
 	private VirtualLoggingFile slaver;
 
 	private boolean optimized = true;
+	private boolean initialized;
 
-	public void construct() throws IOException {
+	private int switchThreshold = 1024 * 1024 * 8;
+	private int switchInterval = 60;
+
+	public synchronized void construct() throws IOException {
+		if (this.initialized == false) {
+			this.initialize();
+			this.initialized = true;
+		}
+	}
+
+	private void initialize() throws IOException {
 		if (this.directory == null) {
 			this.directory = this.getDefaultDirectory();
 		}
 
 		if (this.directory.exists() == false) {
 			if (this.directory.mkdirs() == false) {
-				throw new RuntimeException();
+				throw new RuntimeException(String.format("Failed to create directory %s!", this.directory.getAbsolutePath()));
 			}
 		}
+
 		File fmaster = new File(this.directory, String.format("%s1.log", this.getLoggingFilePrefix()));
 		File fslaver = new File(this.directory, String.format("%s2.log", this.getLoggingFilePrefix()));
 
@@ -124,19 +137,26 @@ public abstract class VirtualLoggingSystemImpl implements VirtualLoggingSystem, 
 	}
 
 	public void run() {
+		int lastEndIndex = this.master.getEndIndex();
 		while (this.released == false) {
 			try {
 				this.timingLock.lock();
-				this.timingCondition.await(30, TimeUnit.SECONDS);
+				this.timingCondition.await(this.switchInterval, TimeUnit.SECONDS);
 			} catch (Exception ex) {
 				logger.debug(ex.getMessage(), ex);
 			} finally {
 				this.timingLock.unlock();
 			}
 
+			int increment = this.master.getEndIndex() - lastEndIndex;
+			if (increment < this.switchThreshold) {
+				continue;
+			} // end-if (increasement < this.switchThreshold)
+
 			this.syncMasterAndSlaver();
 			this.swapMasterAndSlaver();
 
+			lastEndIndex = this.master.getEndIndex();
 		}
 	}
 
@@ -249,7 +269,7 @@ public abstract class VirtualLoggingSystemImpl implements VirtualLoggingSystem, 
 		this.master.prepareForReading();
 		Map<Xid, Boolean> recordMap = this.syncStepOne();
 		this.master.prepareForReading();
-		this.syncStepTwo(recordMap);
+		this.syncStepTwo(recordMap, true);
 
 		this.flushSlaverIfNecessary();
 	}
@@ -290,8 +310,12 @@ public abstract class VirtualLoggingSystemImpl implements VirtualLoggingSystem, 
 
 	}
 
-	public void syncStepTwo(Map<Xid, Boolean> recordMap) {
-		List<VirtualLoggingRecord> recordList = new ArrayList<VirtualLoggingRecord>();
+	public List<VirtualLoggingRecord> compressIfNecessary(List<VirtualLoggingRecord> recordList) {
+		return recordList;
+	}
+
+	public void syncStepTwo(Map<Xid, Boolean> recordMap, boolean compressRequired) {
+		final List<VirtualLoggingRecord> recordList = new ArrayList<VirtualLoggingRecord>(COMPRESS_BATCH_SIZE);
 		while (true) {
 			byte[] byteArray = null;
 			try {
@@ -307,22 +331,39 @@ public abstract class VirtualLoggingSystemImpl implements VirtualLoggingSystem, 
 			byte[] keyByteArray = new byte[XidFactory.GLOBAL_TRANSACTION_LENGTH];
 			System.arraycopy(byteArray, 0, keyByteArray, 0, keyByteArray.length);
 			int operator = byteArray[keyByteArray.length];
+			byte[] valueByteArray = new byte[byteArray.length - XidFactory.GLOBAL_TRANSACTION_LENGTH - 1 - 4];
+			System.arraycopy(byteArray, XidFactory.GLOBAL_TRANSACTION_LENGTH + 1 + 4, valueByteArray, 0, valueByteArray.length);
 
 			VirtualLoggingKey xid = new VirtualLoggingKey();
 			xid.setGlobalTransactionId(keyByteArray);
+
+			if (recordMap.containsKey(xid)) /* deleted */ {
+				continue;
+			}
 
 			VirtualLoggingRecord record = new VirtualLoggingRecord();
 			record.setIdentifier(xid);
 			record.setOperator(operator);
 			record.setContent(byteArray);
+			record.setValue(valueByteArray);
 
-			if (recordMap.containsKey(xid) == false) {
-				recordList.add(record);
+			recordList.add(record);
+
+			if (compressRequired == false) {
+				continue;
+			} else if (recordList.size() % COMPRESS_BATCH_SIZE != 0) {
+				continue;
 			}
+
+			List<VirtualLoggingRecord> compressedList = this.compressIfNecessary(recordList);
+			if (compressedList != recordList && compressedList != null) {
+				recordList.clear();
+				recordList.addAll(compressedList);
+			} // end-if (compressedList != recordList && compressedList != null)
 
 		}
 
-		for (int i = 0; i < recordList.size(); i++) {
+		for (int i = 0; recordList != null && i < recordList.size(); i++) {
 			VirtualLoggingRecord record = recordList.get(i);
 			Xid xid = record.getIdentifier();
 			if (recordMap.containsKey(xid) == false) {
@@ -336,7 +377,7 @@ public abstract class VirtualLoggingSystemImpl implements VirtualLoggingSystem, 
 	public void swapMasterAndSlaver() {
 		try {
 			this.lock.lock();
-			this.syncStepTwo(new HashMap<Xid, Boolean>());
+			this.syncStepTwo(new HashMap<Xid, Boolean>(), false);
 
 			this.slaver.markAsMaster();
 			this.master.switchToSlaver();
@@ -404,6 +445,22 @@ public abstract class VirtualLoggingSystemImpl implements VirtualLoggingSystem, 
 		logging.setTrigger(this);
 		logging.setIdentifier(this.getLoggingIdentifier().getBytes());
 		return logging;
+	}
+
+	public int getSwitchThreshold() {
+		return switchThreshold;
+	}
+
+	public void setSwitchThreshold(int switchThreshold) {
+		this.switchThreshold = switchThreshold;
+	}
+
+	public int getSwitchInterval() {
+		return switchInterval;
+	}
+
+	public void setSwitchInterval(int switchInterval) {
+		this.switchInterval = switchInterval;
 	}
 
 	public boolean isOptimized() {

@@ -15,7 +15,6 @@
  */
 package org.bytesoft.bytejta;
 
-import org.bytesoft.bytejta.supports.wire.RemoteCoordinator;
 import org.bytesoft.transaction.TransactionBeanFactory;
 import org.bytesoft.transaction.TransactionLock;
 import org.bytesoft.transaction.TransactionManager;
@@ -23,6 +22,7 @@ import org.bytesoft.transaction.TransactionRecovery;
 import org.bytesoft.transaction.TransactionRepository;
 import org.bytesoft.transaction.logging.ArchiveDeserializer;
 import org.bytesoft.transaction.logging.TransactionLogger;
+import org.bytesoft.transaction.remote.RemoteCoordinator;
 import org.bytesoft.transaction.supports.TransactionTimer;
 import org.bytesoft.transaction.supports.rpc.TransactionInterceptor;
 import org.bytesoft.transaction.supports.serialize.XAResourceDeserializer;
@@ -110,7 +110,7 @@ public class TransactionBeanFactoryImpl implements TransactionBeanFactory {
 		this.transactionRecovery = transactionRecovery;
 	}
 
-	public RemoteCoordinator getTransactionCoordinator() {
+	public RemoteCoordinator getNativeParticipant() {
 		return transactionCoordinator;
 	}
 

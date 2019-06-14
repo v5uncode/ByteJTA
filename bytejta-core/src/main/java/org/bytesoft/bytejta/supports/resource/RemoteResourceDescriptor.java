@@ -19,19 +19,45 @@ import javax.transaction.xa.XAException;
 import javax.transaction.xa.XAResource;
 import javax.transaction.xa.Xid;
 
-import org.bytesoft.bytejta.supports.wire.RemoteCoordinator;
+import org.apache.commons.lang3.StringUtils;
 import org.bytesoft.common.utils.CommonUtils;
+import org.bytesoft.transaction.remote.RemoteAddr;
+import org.bytesoft.transaction.remote.RemoteCoordinator;
+import org.bytesoft.transaction.remote.RemoteNode;
+import org.bytesoft.transaction.remote.RemoteSvc;
 import org.bytesoft.transaction.supports.resource.XAResourceDescriptor;
 
 public class RemoteResourceDescriptor implements XAResourceDescriptor {
+	public static final int X_SAME_CLUSTER = 501;
 
 	private RemoteCoordinator delegate;
+	private String identifier;
 
 	public void setIdentifier(String identifier) {
+		this.identifier = identifier;
 	}
 
 	public String getIdentifier() {
-		return this.delegate == null ? null : this.delegate.getIdentifier();
+		if (StringUtils.isNotBlank(this.identifier)) {
+			return this.identifier;
+		} else if (this.delegate == null) {
+			return null;
+		}
+
+		this.identifier = this.delegate.getIdentifier();
+		return this.identifier;
+	}
+
+	public RemoteAddr getRemoteAddr() {
+		return this.delegate == null ? null : this.delegate.getRemoteAddr();
+	}
+
+	public RemoteNode getRemoteNode() {
+		return this.delegate == null ? null : this.delegate.getRemoteNode();
+	}
+
+	public RemoteSvc getRemoteSvc() {
+		return this.delegate == null ? null : CommonUtils.getRemoteSvc(this.delegate.getIdentifier());
 	}
 
 	public boolean isTransactionCommitted(Xid xid) throws IllegalStateException {
@@ -39,7 +65,7 @@ public class RemoteResourceDescriptor implements XAResourceDescriptor {
 	}
 
 	public String toString() {
-		return String.format("remote-resource[id= %s]", this.getIdentifier());
+		return String.valueOf(this.delegate);
 	}
 
 	public void setTransactionTimeoutQuietly(int timeout) {
@@ -62,12 +88,24 @@ public class RemoteResourceDescriptor implements XAResourceDescriptor {
 	}
 
 	public boolean isSameRM(XAResource xares) throws XAException {
-		try {
-			RemoteResourceDescriptor that = (RemoteResourceDescriptor) xares;
-			return CommonUtils.equals(this.getIdentifier(), that.getIdentifier());
-		} catch (RuntimeException rex) {
+		if (xares == null) {
+			return false;
+		} else if (RemoteResourceDescriptor.class.isInstance(xares) == false) {
 			return false;
 		}
+		RemoteResourceDescriptor that = (RemoteResourceDescriptor) xares;
+		String thisKey = this.getIdentifier();
+		String thatKey = that.getIdentifier();
+
+		if (StringUtils.equalsIgnoreCase(thisKey, thatKey)) {
+			return true;
+		}
+
+		if (CommonUtils.applicationEquals(thisKey, thatKey)) {
+			throw new XAException(X_SAME_CLUSTER);
+		}
+
+		return false;
 	}
 
 	public int prepare(Xid arg0) throws XAException {

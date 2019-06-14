@@ -1,14 +1,50 @@
-﻿ByteJTA是一个基于XA/2PC机制的分布式事务管理器。实现了JTA接口，可以很好的与EJB、Spring等容器（本文档下文说明中将以Spring容器为例）进行集成。
+﻿
+**ByteJTA** is an implementation of Distributed Transaction Manager, based on the XA/2PC mechanism. 
 
-## 一、文档 & 样例
-* 使用文档： https://github.com/liuyangming/ByteJTA/wiki
-* 使用样例： https://github.com/liuyangming/ByteJTA-sample
+**ByteJTA** is comptible with JTA and could be seamlessly integrated with Spring and other Java containers.
 
-## 二、ByteJTA特性
-* 1、支持Spring容器的声明式事务管理；
-* 2、支持多数据源、跨应用、跨服务器等分布式事务场景；
-* 3、支持spring cloud；
-* 4、支持dubbo服务框架；
 
-## 三、建议及改进
-若您有任何建议，可以通过1）加入qq群537445956/606453172向群主提出，或2）发送邮件至bytefox@126.com向我反馈。本人承诺，任何建议都将会被认真考虑，优秀的建议将会被采用，但不保证一定会在当前版本中实现。
+## 1. Quick Start
+
+#### 1.1 Add maven depenency
+###### 1.1.1. Spring Cloud
+```xml
+<dependency>
+	<groupId>org.bytesoft</groupId>
+	<artifactId>bytejta-supports-springcloud</artifactId>
+	<version>0.5.0-BETA5</version>
+</dependency>
+```
+###### 1.1.2. dubbo
+```xml
+<dependency>
+	<groupId>org.bytesoft</groupId>
+	<artifactId>bytejta-supports-dubbo</artifactId>
+	<version>0.5.0-BETA5</version>
+</dependency>
+```
+
+
+
+## 2. Documentation & Samples
+* [Document](https://github.com/liuyangming/ByteJTA/wiki)
+* [Sample](https://github.com/liuyangming/ByteJTA-sample)
+
+
+
+## 3. Features
+* support declarative transaction management
+* support distributed transaction scenarios. e.g. multi-datasource, cross-applications and cross-servers transaction
+* support Dubbo framework
+* support Spring Cloud
+
+
+
+## 4. Contact Me
+If you have any questions or comments regarding this project, please feel free to contact me at:
+
+1. send mail to _[bytefox#126.com](bytefox@126.com)_
+~OR~
+2. add Tecent QQ group 537445956/606453172
+
+We will review all the suggestions and implement good ones in future release.

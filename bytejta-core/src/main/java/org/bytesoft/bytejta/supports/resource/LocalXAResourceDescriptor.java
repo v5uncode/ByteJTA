@@ -27,7 +27,8 @@ import org.bytesoft.transaction.supports.resource.XAResourceDescriptor;
 public class LocalXAResourceDescriptor implements XAResourceDescriptor {
 
 	private String identifier;
-	private XAResource delegate;
+	private LocalXAResource delegate;
+	private boolean loggingRequired;
 
 	public boolean isTransactionCommitted(Xid xid) throws IllegalStateException {
 		try {
@@ -63,7 +64,7 @@ public class LocalXAResourceDescriptor implements XAResourceDescriptor {
 		if (this.delegate == null) {
 			return;
 		}
-		delegate.commit(arg0, arg1);
+		delegate.commit(arg0, this.loggingRequired); // onePhaseCommit is unnecessary.
 	}
 
 	public void end(Xid arg0, int arg1) throws XAException {
@@ -94,7 +95,9 @@ public class LocalXAResourceDescriptor implements XAResourceDescriptor {
 
 		if (LocalXAResourceDescriptor.class.isInstance(xares)) {
 			LocalXAResourceDescriptor that = (LocalXAResourceDescriptor) xares;
-			return StringUtils.equals(this.identifier, that.identifier);
+			boolean identifierEquals = StringUtils.equals(this.identifier, that.identifier);
+			boolean xaResourceEquals = this.delegate.isSameRM(that.delegate); // this.delegate != null
+			return identifierEquals && xaResourceEquals;
 		} else {
 			return delegate.isSameRM(xares);
 		}
@@ -136,6 +139,14 @@ public class LocalXAResourceDescriptor implements XAResourceDescriptor {
 		delegate.start(arg0, arg1);
 	}
 
+	public boolean isLoggingRequired() {
+		return loggingRequired;
+	}
+
+	public void setLoggingRequired(boolean loggingRequired) {
+		this.loggingRequired = loggingRequired;
+	}
+
 	public String getIdentifier() {
 		return identifier;
 	}
@@ -148,7 +159,7 @@ public class LocalXAResourceDescriptor implements XAResourceDescriptor {
 		return delegate;
 	}
 
-	public void setDelegate(XAResource delegate) {
+	public void setDelegate(LocalXAResource delegate) {
 		this.delegate = delegate;
 	}
 

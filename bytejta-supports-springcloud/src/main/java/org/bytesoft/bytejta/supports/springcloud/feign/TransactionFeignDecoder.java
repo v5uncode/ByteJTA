@@ -17,24 +17,24 @@ package org.bytesoft.bytejta.supports.springcloud.feign;
 
 import java.io.IOException;
 import java.lang.reflect.Type;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.Map;
 
 import org.apache.commons.lang3.StringUtils;
 import org.bytesoft.bytejta.supports.rpc.TransactionResponseImpl;
 import org.bytesoft.bytejta.supports.springcloud.SpringCloudBeanRegistry;
-import org.bytesoft.bytejta.supports.wire.RemoteCoordinator;
-import org.bytesoft.common.utils.ByteUtils;
-import org.bytesoft.common.utils.CommonUtils;
+import org.bytesoft.common.utils.SerializeUtils;
 import org.bytesoft.transaction.TransactionContext;
+import org.bytesoft.transaction.remote.RemoteCoordinator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.ObjectFactory;
-import org.springframework.boot.autoconfigure.web.HttpMessageConverters;
-import org.springframework.cloud.netflix.feign.support.ResponseEntityDecoder;
-import org.springframework.cloud.netflix.feign.support.SpringDecoder;
+import org.springframework.boot.autoconfigure.http.HttpMessageConverters;
+import org.springframework.cloud.openfeign.support.ResponseEntityDecoder;
+import org.springframework.cloud.openfeign.support.SpringDecoder;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 
@@ -46,8 +46,8 @@ import feign.codec.DecodeException;
 public class TransactionFeignDecoder implements feign.codec.Decoder, InitializingBean, ApplicationContextAware {
 	static Logger logger = LoggerFactory.getLogger(TransactionFeignDecoder.class);
 
-	static final String HEADER_TRANCACTION_KEY = "org.bytesoft.bytejta.transaction";
-	static final String HEADER_PROPAGATION_KEY = "org.bytesoft.bytejta.propagation";
+	static final String HEADER_TRANCACTION_KEY = "X-BYTEJTA-TRANSACTION"; // org.bytesoft.bytejta.transaction
+	static final String HEADER_PROPAGATION_KEY = "X-BYTEJTA-PROPAGATION"; // org.bytesoft.bytejta.propagation
 
 	private ApplicationContext applicationContext;
 	private feign.codec.Decoder delegate;
@@ -109,8 +109,8 @@ public class TransactionFeignDecoder implements feign.codec.Decoder, Initializin
 			String transactionStr = StringUtils.isBlank(respTransactionStr) ? reqTransactionStr : respTransactionStr;
 			String propagationStr = StringUtils.isBlank(respPropagationStr) ? reqPropagationStr : respPropagationStr;
 
-			byte[] byteArray = ByteUtils.stringToByteArray(transactionStr);
-			TransactionContext transactionContext = (TransactionContext) CommonUtils.deserializeObject(byteArray);
+			byte[] byteArray = Base64.getDecoder().decode(transactionStr); // ByteUtils.stringToByteArray(transactionStr);
+			TransactionContext transactionContext = (TransactionContext) SerializeUtils.deserializeObject(byteArray);
 
 			SpringCloudBeanRegistry beanRegistry = SpringCloudBeanRegistry.getInstance();
 			RemoteCoordinator remoteCoordinator = beanRegistry.getConsumeCoordinator(propagationStr);

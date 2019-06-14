@@ -22,12 +22,13 @@ import javax.transaction.xa.XAException;
 import javax.transaction.xa.XAResource;
 
 import org.bytesoft.bytejta.supports.resource.RemoteResourceDescriptor;
-import org.bytesoft.bytejta.supports.wire.RemoteCoordinator;
 import org.bytesoft.transaction.Transaction;
 import org.bytesoft.transaction.TransactionBeanFactory;
 import org.bytesoft.transaction.TransactionContext;
 import org.bytesoft.transaction.TransactionManager;
+import org.bytesoft.transaction.TransactionParticipant;
 import org.bytesoft.transaction.aware.TransactionBeanFactoryAware;
+import org.bytesoft.transaction.remote.RemoteCoordinator;
 import org.bytesoft.transaction.supports.rpc.TransactionInterceptor;
 import org.bytesoft.transaction.supports.rpc.TransactionRequest;
 import org.bytesoft.transaction.supports.rpc.TransactionResponse;
@@ -38,7 +39,7 @@ public class TransactionInterceptorImpl implements TransactionInterceptor, Trans
 	static final Logger logger = LoggerFactory.getLogger(TransactionInterceptorImpl.class);
 
 	@javax.inject.Inject
-	private TransactionBeanFactory beanFactory;
+	protected TransactionBeanFactory beanFactory;
 
 	public void beforeSendRequest(TransactionRequest request) throws IllegalStateException {
 		TransactionManager transactionManager = this.beanFactory.getTransactionManager();
@@ -83,7 +84,7 @@ public class TransactionInterceptorImpl implements TransactionInterceptor, Trans
 			return;
 		}
 
-		RemoteCoordinator coordinator = this.beanFactory.getTransactionCoordinator();
+		TransactionParticipant coordinator = this.beanFactory.getNativeParticipant();
 
 		TransactionContext srcTransactionContext = transaction.getTransactionContext();
 		TransactionContext transactionContext = srcTransactionContext.clone();
@@ -105,7 +106,7 @@ public class TransactionInterceptorImpl implements TransactionInterceptor, Trans
 			return;
 		}
 
-		RemoteCoordinator coordinator = this.beanFactory.getTransactionCoordinator();
+		TransactionParticipant coordinator = this.beanFactory.getNativeParticipant();
 
 		TransactionContext transactionContext = srcTransactionContext.clone();
 		transactionContext.setPropagatedBy(srcTransactionContext.getPropagatedBy());
@@ -149,6 +150,10 @@ public class TransactionInterceptorImpl implements TransactionInterceptor, Trans
 			throw new IllegalStateException(ex);
 		}
 
+	}
+
+	public TransactionBeanFactory getBeanFactory() {
+		return this.beanFactory;
 	}
 
 	public void setBeanFactory(TransactionBeanFactory tbf) {

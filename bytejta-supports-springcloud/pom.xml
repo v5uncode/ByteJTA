@@ -5,7 +5,7 @@
 	<parent>
 		<groupId>org.bytesoft</groupId>
 		<artifactId>bytejta-parent</artifactId>
-		<version>0.5.0-SNAPSHOT</version>
+		<version>0.5.0-BETA5</version>
 	</parent>
 
 	<artifactId>bytejta-supports-springcloud</artifactId>
@@ -50,12 +50,16 @@
 		</dependency>
 
 		<dependency>
-			<groupId>org.springframework.cloud</groupId>
-			<artifactId>spring-cloud-starter-eureka</artifactId>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-autoconfigure</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.cloud</groupId>
-			<artifactId>spring-cloud-starter-ribbon</artifactId>
+			<artifactId>spring-cloud-starter-netflix-eureka-server</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-netflix-ribbon</artifactId>
 			<exclusions>
 				<exclusion>
 					<groupId>io.netty</groupId>
@@ -88,6 +92,31 @@
 			</exclusions>
 		</dependency>
 		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-netflix-hystrix</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-netflix-core</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-openfeign-core</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-openfeign</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-commons</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-zookeeper-core</artifactId>
+		</dependency>
+
+		<dependency>
 			<groupId>io.netty</groupId>
 			<artifactId>netty-buffer</artifactId>
 		</dependency>
@@ -117,25 +146,26 @@
 		</dependency>
 
 		<dependency>
-			<groupId>org.springframework.cloud</groupId>
-			<artifactId>spring-cloud-starter-feign</artifactId>
-		</dependency>
-
-		<dependency>
 			<groupId>aopalliance</groupId>
 			<artifactId>aopalliance</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>cglib</groupId>
 			<artifactId>cglib</artifactId>
+			<exclusions>
+				<exclusion>
+					<groupId>asm</groupId>
+					<artifactId>asm</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+		<dependency>
+			<groupId>org.ow2.asm</groupId>
+			<artifactId>asm</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.aspectj</groupId>
 			<artifactId>aspectjweaver</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.apache.curator</groupId>
-			<artifactId>curator-recipes</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.commons</groupId>

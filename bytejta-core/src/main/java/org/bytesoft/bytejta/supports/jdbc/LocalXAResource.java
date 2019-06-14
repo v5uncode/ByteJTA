@@ -21,7 +21,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.Calendar;
 
 import javax.transaction.xa.XAException;
 import javax.transaction.xa.XAResource;
@@ -40,7 +39,6 @@ public class LocalXAResource implements XAResource {
 	private Xid suspendXid;
 	private boolean suspendAutoCommit;
 	private boolean originalAutoCommit;
-	private boolean loggingRequired;
 
 	public LocalXAResource() {
 	}
@@ -78,7 +76,19 @@ public class LocalXAResource implements XAResource {
 			if (rs.next() == false) {
 				throw new XAException(XAException.XAER_NOTA);
 			}
-		} catch (Exception ex) {
+		} catch (SQLException ex) {
+			try {
+				this.isTableExists(connection);
+			} catch (SQLException sqlEx) {
+				logger.warn("Error occurred while recovering local-xa-resource.", ex);
+				throw new XAException(XAException.XAER_RMFAIL);
+			} catch (RuntimeException rex) {
+				logger.warn("Error occurred while recovering local-xa-resource.", ex);
+				throw new XAException(XAException.XAER_RMFAIL);
+			}
+
+			throw new XAException(XAException.XAER_RMERR);
+		} catch (RuntimeException ex) {
 			logger.warn("Error occurred while recovering local-xa-resource.", ex);
 			throw new XAException(XAException.XAER_RMERR);
 		} finally {
@@ -89,7 +99,7 @@ public class LocalXAResource implements XAResource {
 
 	public synchronized void start(Xid xid, int flags) throws XAException {
 		if (xid == null) {
-			throw new XAException();
+			throw new XAException(XAException.XAER_INVAL);
 		} else if (flags == XAResource.TMRESUME && this.suspendXid != null) {
 			if (this.suspendXid.equals(xid)) {
 				this.suspendXid = null;
@@ -98,16 +108,16 @@ public class LocalXAResource implements XAResource {
 				this.suspendAutoCommit = true;
 				return;
 			} else {
-				throw new XAException();
+				throw new XAException(XAException.XAER_PROTO);
 			}
 		} else if (flags == XAResource.TMJOIN) {
 			if (this.currentXid == null) {
-				throw new XAException();
+				throw new XAException(XAException.XAER_PROTO);
 			}
 		} else if (flags != XAResource.TMNOFLAGS) {
-			throw new XAException();
+			throw new XAException(XAException.XAER_PROTO);
 		} else if (this.currentXid != null) {
-			throw new XAException();
+			throw new XAException(XAException.XAER_PROTO);
 		} else {
 			Connection connection = this.managedConnection.getPhysicalConnection();
 
@@ -120,7 +130,7 @@ public class LocalXAResource implements XAResource {
 			try {
 				connection.setAutoCommit(false);
 			} catch (Exception ex) {
-				XAException xae = new XAException();
+				XAException xae = new XAException(XAException.XAER_RMERR);
 				xae.initCause(ex);
 				throw xae;
 			}
@@ -131,70 +141,23 @@ public class LocalXAResource implements XAResource {
 
 	public synchronized void end(Xid xid, int flags) throws XAException {
 		if (xid == null) {
-			throw new XAException();
+			throw new XAException(XAException.XAER_INVAL);
 		} else if (this.currentXid == null) {
-			throw new XAException();
+			throw new XAException(XAException.XAER_PROTO);
 		} else if (!this.currentXid.equals(xid)) {
-			throw new XAException();
+			throw new XAException(XAException.XAER_PROTO);
 		} else if (flags == XAResource.TMSUSPEND) {
 			this.suspendXid = xid;
 			this.suspendAutoCommit = this.originalAutoCommit;
 			this.currentXid = null;
 			this.originalAutoCommit = true;
 		} else if (flags == XAResource.TMSUCCESS) {
-			if (this.loggingRequired) {
-				byte[] globalTransactionId = xid.getGlobalTransactionId();
-				byte[] branchQualifier = xid.getBranchQualifier();
-
-				String gxid = ByteUtils.byteArrayToString(globalTransactionId);
-				String bxid = null;
-				if (branchQualifier == null || branchQualifier.length == 0) {
-					bxid = gxid;
-				} else {
-					bxid = ByteUtils.byteArrayToString(branchQualifier);
-				}
-
-				String identifier = this.getIdentifier(globalTransactionId, branchQualifier);
-
-				Connection connection = this.managedConnection.getPhysicalConnection();
-
-				PreparedStatement stmt = null;
-				try {
-					stmt = connection.prepareStatement("insert into bytejta(xid, gxid, bxid, ctime) values(?, ?, ?, ?)");
-					stmt.setString(1, identifier);
-					stmt.setString(2, gxid);
-					stmt.setString(3, bxid);
-					stmt.setLong(4, System.currentTimeMillis());
-					int value = stmt.executeUpdate();
-					if (value == 0) {
-						throw new IllegalStateException("The operation failed and the data was not written to the database!");
-					}
-				} catch (SQLException ex) {
-					boolean tableExists = false;
-					try {
-						tableExists = this.isTableExists(connection);
-					} catch (Exception sqlEx) {
-						logger.error("Error occurred while ending local-xa-resource: {}", ex.getMessage());
-						throw new XAException(XAException.XAER_RMFAIL);
-					}
-
-					if (tableExists) {
-						logger.error("Error occurred while ending local-xa-resource: {}", ex.getMessage());
-						throw new XAException(XAException.XAER_RMERR);
-					} else {
-						logger.debug("Error occurred while ending local-xa-resource: {}", ex.getMessage());
-					}
-				} catch (RuntimeException rex) {
-					logger.error("Error occurred while ending local-xa-resource: {}", rex.getMessage());
-					throw new XAException(XAException.XAER_RMERR);
-				} finally {
-					this.closeQuietly(stmt);
-				}
-			}
+			// delay the logging operation to the commit phase.
+			// this.createTransactionLogIfNecessary(xid);
 		} else if (flags == XAResource.TMFAIL) {
 			logger.debug("Error occurred while ending local-xa-resource.");
 		} else {
-			throw new XAException();
+			throw new XAException(XAException.XAER_PROTO);
 		}
 	}
 
@@ -211,21 +174,25 @@ public class LocalXAResource implements XAResource {
 		return XAResource.XA_OK;
 	}
 
-	public synchronized void commit(Xid xid, boolean onePhase) throws XAException {
+	public synchronized void commit(Xid xid, boolean loggingRequired) throws XAException {
 		try {
 			if (xid == null) {
-				throw new XAException();
+				throw new XAException(XAException.XAER_INVAL);
 			} else if (this.currentXid == null) {
-				throw new XAException();
+				throw new XAException(XAException.XAER_PROTO);
 			} else if (!this.currentXid.equals(xid)) {
-				throw new XAException();
+				throw new XAException(XAException.XAER_PROTO);
 			}
+
+			if (loggingRequired) {
+				this.createTransactionLogIfNecessary(xid);
+			} // end-if (loggingRequired)
 
 			this.managedConnection.commitLocalTransaction();
 		} catch (XAException xae) {
 			throw xae;
 		} catch (Exception ex) {
-			XAException xae = new XAException();
+			XAException xae = new XAException(XAException.XAER_RMERR);
 			xae.initCause(ex);
 			throw xae;
 		} finally {
@@ -236,22 +203,72 @@ public class LocalXAResource implements XAResource {
 	public synchronized void rollback(Xid xid) throws XAException {
 		try {
 			if (xid == null) {
-				throw new XAException();
+				throw new XAException(XAException.XAER_INVAL);
 			} else if (this.currentXid == null) {
-				throw new XAException();
+				throw new XAException(XAException.XAER_PROTO);
 			} else if (!this.currentXid.equals(xid)) {
-				throw new XAException();
+				throw new XAException(XAException.XAER_PROTO);
 			}
 
 			this.managedConnection.rollbackLocalTransaction();
 		} catch (XAException xae) {
 			throw xae;
 		} catch (Exception ex) {
-			XAException xae = new XAException();
+			XAException xae = new XAException(XAException.XAER_RMERR);
 			xae.initCause(ex);
 			throw xae;
 		} finally {
 			this.releasePhysicalConnection();
+		}
+	}
+
+	private void createTransactionLogIfNecessary(Xid xid) throws XAException {
+		byte[] globalTransactionId = xid.getGlobalTransactionId();
+		byte[] branchQualifier = xid.getBranchQualifier();
+
+		String gxid = ByteUtils.byteArrayToString(globalTransactionId);
+		String bxid = null;
+		if (branchQualifier == null || branchQualifier.length == 0) {
+			bxid = gxid;
+		} else {
+			bxid = ByteUtils.byteArrayToString(branchQualifier);
+		}
+
+		String identifier = this.getIdentifier(globalTransactionId, branchQualifier);
+
+		Connection connection = this.managedConnection.getPhysicalConnection();
+
+		PreparedStatement stmt = null;
+		try {
+			stmt = connection.prepareStatement("insert into bytejta(xid, gxid, bxid, ctime) values(?, ?, ?, ?)");
+			stmt.setString(1, identifier);
+			stmt.setString(2, gxid);
+			stmt.setString(3, bxid);
+			stmt.setLong(4, System.currentTimeMillis());
+			int value = stmt.executeUpdate();
+			if (value == 0) {
+				throw new IllegalStateException("The operation failed and the data was not written to the database!");
+			}
+		} catch (SQLException ex) {
+			boolean tableExists = false;
+			try {
+				tableExists = this.isTableExists(connection);
+			} catch (Exception sqlEx) {
+				logger.error("Error occurred while ending local-xa-resource: {}", ex.getMessage());
+				throw new XAException(XAException.XAER_RMFAIL);
+			}
+
+			if (tableExists) {
+				logger.error("Error occurred while ending local-xa-resource: {}", ex.getMessage());
+				throw new XAException(XAException.XAER_RMERR);
+			} else {
+				logger.debug("Error occurred while ending local-xa-resource: {}", ex.getMessage());
+			}
+		} catch (RuntimeException rex) {
+			logger.error("Error occurred while ending local-xa-resource: {}", rex.getMessage());
+			throw new XAException(XAException.XAER_RMERR);
+		} finally {
+			this.closeQuietly(stmt);
 		}
 	}
 
@@ -270,7 +287,16 @@ public class LocalXAResource implements XAResource {
 	}
 
 	public boolean isSameRM(XAResource xares) {
-		return this == xares;
+		if (this == xares) {
+			return true;
+		} else if (LocalXAResource.class.isInstance(xares) == false) {
+			return false;
+		}
+
+		LocalXAResource that = (LocalXAResource) xares;
+		Connection thisConn = this.managedConnection.getPhysicalConnection();
+		Connection thatConn = that.managedConnection.getPhysicalConnection();
+		return thisConn == thatConn;
 	}
 
 	public void forgetQuietly(Xid xid) {
@@ -350,43 +376,58 @@ public class LocalXAResource implements XAResource {
 		}
 	}
 
-	protected String getIdentifier(byte[] globalTransactionId, byte[] branchQualifier) {
+	protected String getIdentifier(byte[] globalByteArray, byte[] branchByteArray) {
+		if (branchByteArray == null || branchByteArray.length != XidFactory.BRANCH_QUALIFIER_LENGTH) {
+			logger.warn("Invalid branchByteArray: the length of branchQulifier not equals to 16!");
+			return ByteUtils.byteArrayToString(globalByteArray);
+		}
+
+		byte[] gvalueByteArray = new byte[4];
+		System.arraycopy(globalByteArray, 6, gvalueByteArray, 0, 4);
+		int global = ByteUtils.byteArrayToInt(gvalueByteArray);
+
+		int gday = (global << 8) >>> 27;
+		int ghour = (global << 13) >>> 27;
+		int gminute = (global << 18) >>> 26;
+		int gsecond = (global << 24) >>> 26;
+		int gmillis = ((global << 30) >>> 22) | (globalByteArray[11] - Byte.MIN_VALUE);
+
+		int datime = 0;
+		datime = datime | (gday << 27);
+		datime = datime | (ghour << 22);
+		datime = datime | (gminute << 16);
+		datime = datime | (gsecond << 10);
+		datime = datime | gmillis;
+		byte[] datimeByteArray = ByteUtils.intToByteArray(datime);
+
+		byte[] bvalueByteArray = new byte[4];
+		System.arraycopy(branchByteArray, 6, bvalueByteArray, 0, 4);
+		int branch = ByteUtils.byteArrayToInt(bvalueByteArray);
+
+		int bmonth = (branch << 4) >> 28;
+		int bminute = (branch << 18) >>> 26;
+		int bsecond = (branch << 24) >>> 26;
+		int bmillis = ((branch << 30) >>> 22) | (branchByteArray[11] - Byte.MIN_VALUE);
+
+		byte[] randomByteArray = new byte[4];
+		System.arraycopy(branchByteArray, 12, randomByteArray, 0, 4);
+		int brandom = ByteUtils.byteArrayToInt(randomByteArray);
+		int bprefix = ((brandom >>> 16) << 26) >>> 26;
+
+		int millis = 0;
+		millis = millis | (bmonth << 28);
+		millis = millis | (bminute << 22);
+		millis = millis | (bsecond << 16);
+		millis = millis | (bmillis << 6);
+		millis = millis | bprefix;
+		byte[] millisByteArray = ByteUtils.intToByteArray(millis);
+
 		byte[] resultByteArray = new byte[16];
-
-		byte[] globalByteArray = globalTransactionId;
-		byte[] branchByteArray = branchQualifier == null || branchQualifier.length == 0 ? globalTransactionId : branchQualifier;
-
-		byte[] millisByteArray = new byte[8];
-		System.arraycopy(branchByteArray, 6, millisByteArray, 0, 8);
-
-		long millis = ByteUtils.byteArrayToLong(millisByteArray);
-		Calendar calendar = Calendar.getInstance();
-		calendar.setTimeInMillis(millis);
-		int hour = calendar.get(Calendar.HOUR_OF_DAY);
-		int minute = calendar.get(Calendar.MINUTE);
-		int second = calendar.get(Calendar.SECOND);
-
-		int intTimeValue = (hour << 12) | (minute << 6) | second;
-		short shortTimeValue = (short) intTimeValue;
-		byte[] timeByteArray = ByteUtils.shortToByteArray(shortTimeValue);
-
-		int globalStartIndex = XidFactory.GLOBAL_TRANSACTION_LENGTH - 4;
-		int branchStartIndex = XidFactory.BRANCH_QUALIFIER_LENGTH - 4;
-
-		System.arraycopy(branchByteArray, 0, resultByteArray, 0, 6);
-		System.arraycopy(timeByteArray, 0, resultByteArray, 6, 2);
-		System.arraycopy(globalByteArray, globalStartIndex, resultByteArray, 8, 4);
-		System.arraycopy(branchByteArray, branchStartIndex, resultByteArray, 12, 4);
-
+		System.arraycopy(globalByteArray, 0, resultByteArray, 0, 6);
+		System.arraycopy(datimeByteArray, 0, resultByteArray, 6, 4);
+		System.arraycopy(millisByteArray, 0, resultByteArray, 10, 4);
+		System.arraycopy(randomByteArray, 2, resultByteArray, 14, 2);
 		return ByteUtils.byteArrayToString(resultByteArray);
-	}
-
-	public boolean isLoggingRequired() {
-		return loggingRequired;
-	}
-
-	public void setLoggingRequired(boolean loggingRequired) {
-		this.loggingRequired = loggingRequired;
 	}
 
 	public int getTransactionTimeout() {

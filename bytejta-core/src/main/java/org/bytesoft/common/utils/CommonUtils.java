@@ -15,96 +15,153 @@
  */
 package org.bytesoft.common.utils;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
-import java.io.IOException;
-import java.io.Serializable;
+import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.NetworkInterface;
 import java.net.UnknownHostException;
+import java.util.Enumeration;
 
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.bytesoft.transaction.remote.RemoteAddr;
+import org.bytesoft.transaction.remote.RemoteNode;
+import org.bytesoft.transaction.remote.RemoteSvc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.caucho.hessian.io.HessianInput;
-import com.caucho.hessian.io.HessianOutput;
 
 public class CommonUtils {
 	static final Logger logger = LoggerFactory.getLogger(CommonUtils.class);
 
-	public static boolean instanceEquals(String source, String target) {
-		if (StringUtils.isBlank(source) && StringUtils.isNotBlank(target)) {
-			return false;
-		} else if (StringUtils.isBlank(target) && StringUtils.isNotBlank(source)) {
-			return false;
-		} else if (StringUtils.isBlank(target) && StringUtils.isBlank(source)) {
-			return true;
+	public static RemoteAddr getRemoteAddr(String identifier) {
+		if (StringUtils.isBlank(identifier)) {
+			return null;
 		} else {
-			String[] sourceArray = source.split("\\s*:\\s*");
-			String[] targetArray = target.split("\\s*:\\s*");
-			if (sourceArray.length != targetArray.length) {
-				return false;
-			} else {
-				String sourceAddr = sourceArray[0];
-				String targetAddr = targetArray[0];
-				String sourcePort = sourceArray[sourceArray.length - 1];
-				String targetPort = targetArray[targetArray.length - 1];
-				return StringUtils.equalsIgnoreCase(sourceAddr, targetAddr)
-						&& StringUtils.equalsIgnoreCase(sourcePort, targetPort);
+			String[] values = identifier.split("\\s*:\\s*");
+			if (values.length != 3) {
+				return null;
 			}
+
+			RemoteAddr remoteAddr = new RemoteAddr();
+			remoteAddr.setServerHost(values[0]);
+			remoteAddr.setServerPort(Integer.parseInt(values[2]));
+			return remoteAddr;
+		}
+	}
+
+	public static RemoteNode getRemoteNode(String identifier) {
+		if (StringUtils.isBlank(identifier)) {
+			return null;
+		} else {
+			String[] values = identifier.split("\\s*:\\s*");
+			if (values.length != 3) {
+				return null;
+			}
+
+			RemoteNode remoteNode = new RemoteNode();
+			remoteNode.setServerHost(values[0]);
+			remoteNode.setServiceKey(values[1]);
+			remoteNode.setServerPort(Integer.parseInt(values[2]));
+			return remoteNode;
+		}
+	}
+
+	public static RemoteSvc getRemoteSvc(RemoteNode remoteNode) {
+		RemoteSvc remoteSvc = new RemoteSvc();
+		remoteSvc.setServerHost(remoteNode.getServerHost());
+		remoteSvc.setServiceKey(remoteNode.getServiceKey());
+		remoteSvc.setServerPort(remoteNode.getServerPort());
+		return remoteSvc;
+	}
+
+	public static RemoteSvc getRemoteSvc(String identifier) {
+		RemoteNode remoteNode = getRemoteNode(identifier);
+		return getRemoteSvc(remoteNode);
+	}
+
+	public static String getApplication(String identifier) {
+		if (StringUtils.isBlank(identifier)) {
+			return null;
+		} else {
+			String[] values = identifier.split("\\s*:\\s*");
+			return values.length == 3 ? values[1] : null;
+		}
+	}
+
+	public static String getInstanceKey(String identifier) {
+		RemoteNode remoteNode = CommonUtils.getRemoteNode(identifier);
+		if (remoteNode == null) {
+			return null;
+		} else {
+			return String.format("%s:%s", remoteNode.getServerHost(), remoteNode.getServerPort());
+		}
+	}
+
+	public static boolean applicationEquals(String source, String target) {
+		String sourceApplication = CommonUtils.getApplication(source);
+		String targetApplication = CommonUtils.getApplication(target);
+		if (StringUtils.isBlank(sourceApplication) || StringUtils.isBlank(targetApplication)) {
+			return false;
+		} else {
+			return StringUtils.equalsIgnoreCase(sourceApplication, targetApplication);
+		}
+	}
+
+	public static boolean instanceKeyEquals(String source, String target) {
+		RemoteAddr sourceAddr = CommonUtils.getRemoteAddr(source);
+		RemoteAddr targetAddr = CommonUtils.getRemoteAddr(target);
+		if (sourceAddr == null || targetAddr == null) {
+			return false;
+		} else {
+			String sourceHost = sourceAddr.getServerHost();
+			String targetHost = targetAddr.getServerHost();
+			int sourcePort = sourceAddr.getServerPort();
+			int targetPort = targetAddr.getServerPort();
+			return StringUtils.equalsIgnoreCase(sourceHost, targetHost) && sourcePort == targetPort;
 		}
 	}
 
 	public static boolean equals(Object o1, Object o2) {
-		if (o1 != null) {
-			return o1.equals(o2);
-		} else if (o2 != null) {
-			return o2.equals(o1);
-		} else {
-			return true;
-		}
-	}
-
-	public static byte[] serializeObject(Serializable obj) throws IOException {
-		ByteArrayOutputStream baos = new ByteArrayOutputStream();
-		HessianOutput ho = new HessianOutput(baos);
-		try {
-			ho.writeObject(obj);
-			return baos.toByteArray();
-		} finally {
-			CommonUtils.closeQuietly(baos);
-		}
-
-	}
-
-	public static Serializable deserializeObject(byte[] bytes) throws IOException {
-		ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
-		HessianInput hi = new HessianInput(bais);
-		Object result;
-		try {
-			result = hi.readObject();
-			return (Serializable) result;
-		} finally {
-			CommonUtils.closeQuietly(bais);
-		}
+		return java.util.Objects.equals(o1, o2);
 	}
 
 	public static void closeQuietly(Closeable closeable) {
-		if (closeable != null) {
-			try {
-				closeable.close();
-			} catch (IOException ex) {
-				logger.debug("Error occurred while closing resource {}.", closeable);
-			}
-		}
+		IOUtils.closeQuietly(closeable);
 	}
 
 	public static String getInetAddress() {
 		try {
+			Enumeration<NetworkInterface> enumeration = NetworkInterface.getNetworkInterfaces();
+			while (enumeration.hasMoreElements()) {
+				NetworkInterface ni = enumeration.nextElement();
+				if (ni.isLoopback()) {
+					continue;
+				} else if (ni.isUp() == false) {
+					continue;
+				}
+
+				Enumeration<InetAddress> inetAddrList = ni.getInetAddresses();
+				while (inetAddrList.hasMoreElements()) {
+					InetAddress inetAddr = inetAddrList.nextElement();
+
+					if (inetAddr.isLoopbackAddress()) {
+						continue;
+					} else if (inetAddr.isMulticastAddress()) {
+						continue;
+					} else if (inetAddr.isAnyLocalAddress()) {
+						continue;
+					} else if (Inet4Address.class.isInstance(inetAddr) == false) {
+						continue;
+					}
+
+					return inetAddr.getHostAddress();
+				}
+
+			}
+
 			InetAddress inetAddr = InetAddress.getLocalHost();
 			return inetAddr.getHostAddress();
-		} catch (UnknownHostException ex) {
+		} catch (Exception ex) {
 			logger.error("Error occurred while getting ip address.", ex);
 			return "127.0.0.1";
 		}

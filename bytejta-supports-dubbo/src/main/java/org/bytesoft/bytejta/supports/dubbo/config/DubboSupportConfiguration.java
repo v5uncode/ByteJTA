@@ -15,88 +15,50 @@
  */
 package org.bytesoft.bytejta.supports.dubbo.config;
 
-import org.bytesoft.bytejta.TransactionBeanFactoryImpl;
-import org.bytesoft.bytejta.supports.config.ScheduleWorkConfiguration;
-import org.bytesoft.bytejta.supports.config.TransactionConfiguration;
-import org.springframework.beans.factory.annotation.Autowired;
+import javax.transaction.UserTransaction;
+
+import org.bytesoft.bytejta.supports.resource.properties.ConnectorResourcePropertySourceFactory;
+import org.bytesoft.transaction.TransactionManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
+import org.springframework.context.EnvironmentAware;
+import org.springframework.context.annotation.EnableAspectJAutoProxy;
+import org.springframework.context.annotation.ImportResource;
+import org.springframework.context.annotation.PropertySource;
+import org.springframework.core.env.Environment;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.transaction.annotation.TransactionManagementConfigurer;
+import org.springframework.transaction.jta.JtaTransactionManager;
 
+@PropertySource(value = "bytejta:connector.config", factory = ConnectorResourcePropertySourceFactory.class)
+@ImportResource({ "classpath:bytejta-supports-dubbo.xml" })
+@EnableAspectJAutoProxy(proxyTargetClass = true)
+@EnableAutoConfiguration(exclude = { DataSourceAutoConfiguration.class })
 @EnableTransactionManagement
-@Import({ TransactionConfiguration.class, ScheduleWorkConfiguration.class })
-@Configuration
-public class DubboSupportConfiguration implements TransactionManagementConfigurer, ApplicationContextAware {
+public class DubboSupportConfiguration implements TransactionManagementConfigurer, ApplicationContextAware, EnvironmentAware {
+	static final Logger logger = LoggerFactory.getLogger(DubboSupportConfiguration.class);
+
+	private Environment environment;
 	private ApplicationContext applicationContext;
 
 	public PlatformTransactionManager annotationDrivenTransactionManager() {
-		org.springframework.transaction.jta.JtaTransactionManager jtaTransactionManager //
-				= new org.springframework.transaction.jta.JtaTransactionManager();
-		jtaTransactionManager.setTransactionManager(TransactionBeanFactoryImpl.getInstance().getTransactionManager());
+		JtaTransactionManager jtaTransactionManager = new JtaTransactionManager();
+		jtaTransactionManager.setTransactionManager(this.applicationContext.getBean(TransactionManager.class));
+		jtaTransactionManager.setUserTransaction(this.applicationContext.getBean(UserTransaction.class));
 		return jtaTransactionManager;
 	}
 
-	@org.springframework.context.annotation.Bean
-	public org.bytesoft.bytejta.supports.dubbo.TransactionEndpointPostProcessor transactionEndpointPostProcessor() {
-		return new org.bytesoft.bytejta.supports.dubbo.TransactionEndpointPostProcessor();
+	public Environment getEnvironment() {
+		return environment;
 	}
 
-	@org.springframework.context.annotation.Bean
-	public org.bytesoft.bytejta.supports.dubbo.DubboConfigPostProcessor dubboConfigPostProcessor() {
-		return new org.bytesoft.bytejta.supports.dubbo.DubboConfigPostProcessor();
-	}
-
-	@org.springframework.context.annotation.Bean
-	public org.bytesoft.bytejta.supports.dubbo.TransactionConfigPostProcessor transactionConfigPostProcessor() {
-		return new org.bytesoft.bytejta.supports.dubbo.TransactionConfigPostProcessor();
-	}
-
-	@org.springframework.context.annotation.Bean
-	public org.bytesoft.bytejta.supports.dubbo.TransactionBeanRegistry springCloudBeanRegistry() {
-		return org.bytesoft.bytejta.supports.dubbo.TransactionBeanRegistry.getInstance();
-	}
-
-	@org.springframework.context.annotation.Bean
-	public org.bytesoft.bytejta.logging.deserializer.XAResourceArchiveDeserializer bytejtaXAResourceDeserializer() {
-		return new org.bytesoft.bytejta.logging.deserializer.XAResourceArchiveDeserializer();
-	}
-
-	@org.springframework.context.annotation.Bean
-	public org.bytesoft.bytejta.logging.deserializer.TransactionArchiveDeserializer bytejtaTransactionDeserializer(
-			@Autowired org.bytesoft.bytejta.logging.deserializer.XAResourceArchiveDeserializer resourceArchiveDeserializer) {
-		org.bytesoft.bytejta.logging.deserializer.TransactionArchiveDeserializer transactionArchiveDeserializer //
-				= new org.bytesoft.bytejta.logging.deserializer.TransactionArchiveDeserializer();
-		transactionArchiveDeserializer.setResourceArchiveDeserializer(resourceArchiveDeserializer);
-		return transactionArchiveDeserializer;
-	}
-
-	@org.springframework.context.annotation.Bean
-	public org.bytesoft.bytejta.logging.ArchiveDeserializerImpl bytejtaArchiveDeserializer(
-			@Autowired org.bytesoft.bytejta.logging.deserializer.TransactionArchiveDeserializer transactionArchiveDeserializer,
-			@Autowired org.bytesoft.bytejta.logging.deserializer.XAResourceArchiveDeserializer xaResourceArchiveDeserializer) {
-		org.bytesoft.bytejta.logging.ArchiveDeserializerImpl archiveDeserializer //
-				= new org.bytesoft.bytejta.logging.ArchiveDeserializerImpl();
-		archiveDeserializer.setTransactionArchiveDeserializer(transactionArchiveDeserializer);
-		archiveDeserializer.setXaResourceArchiveDeserializer(xaResourceArchiveDeserializer);
-		TransactionBeanFactoryImpl.getInstance().setArchiveDeserializer(archiveDeserializer);
-		return archiveDeserializer;
-	}
-
-	@org.springframework.context.annotation.Bean
-	public org.bytesoft.bytejta.supports.dubbo.serialize.XAResourceDeserializerImpl bytejtaResourceDeserializer() {
-		org.bytesoft.bytejta.supports.dubbo.serialize.XAResourceDeserializerImpl resourceDeserializer //
-				= new org.bytesoft.bytejta.supports.dubbo.serialize.XAResourceDeserializerImpl();
-		TransactionBeanFactoryImpl.getInstance().setResourceDeserializer(resourceDeserializer);
-		return resourceDeserializer;
-	}
-
-	@org.springframework.context.annotation.Bean
-	public org.bytesoft.transaction.TransactionBeanFactory transactionBeanFactory() {
-		return TransactionBeanFactoryImpl.getInstance();
+	public void setEnvironment(Environment environment) {
+		this.environment = environment;
 	}
 
 	public ApplicationContext getApplicationContext() {

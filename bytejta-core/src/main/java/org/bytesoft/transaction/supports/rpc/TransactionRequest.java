@@ -15,8 +15,8 @@
  */
 package org.bytesoft.transaction.supports.rpc;
 
-import org.bytesoft.bytejta.supports.wire.RemoteCoordinator;
 import org.bytesoft.transaction.TransactionContext;
+import org.bytesoft.transaction.remote.RemoteCoordinator;
 
 public interface TransactionRequest {
 
@@ -25,5 +25,9 @@ public interface TransactionRequest {
 	public TransactionContext getTransactionContext();
 
 	public void setTransactionContext(TransactionContext transactionContext);
+
+	public Object getHeader(String name);
+
+	public void setHeader(String name, Object value);
 
 }
